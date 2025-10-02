@@ -230,7 +230,7 @@ class CivitaiModelManager:
             return 'checkpoints'
     
     def download_from_url(self, url: str, custom_dir: Optional[str] = None) -> bool:
-        """Download a model from a Civitai URL."""
+        """Download a model from a Civitai URL with automatic model type detection."""
         try:
             # Parse the URL
             url_info = self.url_parser.parse_civitai_url(url)
@@ -258,7 +258,7 @@ class CivitaiModelManager:
                 logger.error(f"Could not determine model ID from URL: {url}")
                 return False
             
-            # Download the model
+            # Download the model with automatic type detection
             return self.download_model(model_id, version_id, custom_dir=custom_dir)
             
         except Exception as e:

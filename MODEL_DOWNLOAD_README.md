@@ -13,6 +13,8 @@ This tool provides a command-line interface for downloading models to ComfyUI, d
 - **Model Discovery**: Search and list available models from multiple sources
 - **Metadata Extraction**: Extract model information and metadata
 - **Civitai Integration**: Full support for Civitai models with automatic type detection
+- **Smart URL Detection**: Automatically detects Civitai URLs and extracts model/version IDs
+- **Automatic Model Type Detection**: No need to specify model types - the tool automatically detects and places models in correct directories
 
 ## Installation
 
@@ -54,15 +56,15 @@ chmod +x download_models.sh
 # Download from Hugging Face
 ./download_models.sh download --model-type checkpoints --source huggingface --repo runwayml/stable-diffusion-v1-5
 
-# Download from Civitai (multiple methods)
-./download_models.sh download --model-type checkpoints --source civitai --model-id 257749
-./download_models.sh download --model-type checkpoints --source civitai --civitai-url "https://civitai.com/models/257749/pony-diffusion-v6-xl"
+# Download from Civitai (multiple methods - all with automatic type detection!)
+./download_models.sh download --source civitai --model-id 257749
+./download_models.sh download --source civitai --civitai-url "https://civitai.com/models/257749/pony-diffusion-v6-xl"
 
 # Download specific version from Civitai
-./download_models.sh download --model-type checkpoints --source civitai --model-id 257749 --version-id 290640
+./download_models.sh download --source civitai --model-id 257749 --version-id 290640
 
-# Automatic URL detection (works with any Civitai URL)
-./download_models.sh download --model-type checkpoints --source url --url "https://civitai.com/models/257749/pony-diffusion-v6-xl"
+# Automatic URL detection (works with any Civitai URL - no model type needed!)
+./download_models.sh download --source url --url "https://civitai.com/models/257749/pony-diffusion-v6-xl"
 
 # Download from direct URL
 ./download_models.sh download --model-type loras --source url --url https://example.com/model.safetensors

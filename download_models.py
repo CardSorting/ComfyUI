@@ -172,17 +172,22 @@ class ModelDownloader:
             logger.error(f"Failed to download from Hugging Face: {e}")
             return False
     
-    def download_from_url(self, url: str, model_type: str, filename: Optional[str] = None) -> bool:
-        """Download model from direct URL."""
+    def download_from_url(self, url: str, model_type: Optional[str] = None, filename: Optional[str] = None) -> bool:
+        """Download model from direct URL with automatic type detection."""
         try:
             # Check if this is a Civitai URL and handle it specially
             if CIVITAI_AVAILABLE:
                 from civitai_integration import CivitaiURLParser
                 url_parser = CivitaiURLParser()
                 if url_parser.is_civitai_url(url):
-                    logger.info("Detected Civitai URL, using Civitai integration...")
+                    logger.info("🔍 Detected Civitai URL, using Civitai integration with auto-detection...")
                     manager = CivitaiModelManager()
                     return manager.download_from_url(url)
+            
+            # For non-Civitai URLs, model_type is required
+            if not model_type:
+                logger.error("Model type is required for non-Civitai URLs. Use --model-type or provide a Civitai URL for auto-detection.")
+                return False
             
             # Get model directory
             model_dir = self.get_model_directory(model_type)
@@ -342,9 +347,9 @@ Examples:
     
     # Download command
     download_parser = subparsers.add_parser('download', help='Download models')
-    download_parser.add_argument('--model-type', required=True,
+    download_parser.add_argument('--model-type',
                                choices=folder_paths.folder_names_and_paths.keys(),
-                               help='Type of model to download')
+                               help='Type of model to download (auto-detected for Civitai URLs)')
     download_parser.add_argument('--source', required=True, choices=['huggingface', 'url', 'civitai'],
                                help='Source to download from')
     download_parser.add_argument('--repo', help='Hugging Face repository ID (for huggingface source)')
