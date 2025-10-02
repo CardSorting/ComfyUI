@@ -1,0 +1,51 @@
+{
+  "downloads": [
+    {
+      "name": "Stable Diffusion v1.5",
+      "model_type": "checkpoints",
+      "source": "huggingface",
+      "repo_id": "runwayml/stable-diffusion-v1-5",
+      "filename": "v1-5-pruned-emaonly.safetensors"
+    },
+    {
+      "name": "DreamShaper v8",
+      "model_type": "checkpoints",
+      "source": "civitai",
+      "model_id": 128713,
+      "version_id": 146759
+    },
+    {
+      "name": "Realistic Vision v6.0",
+      "model_type": "checkpoints",
+      "source": "civitai",
+      "model_id": 4201,
+      "version_id": 130090
+    },
+    {
+      "name": "ChilloutMix",
+      "model_type": "checkpoints",
+      "source": "civitai",
+      "model_id": 6424,
+      "version_id": 130072
+    },
+    {
+      "name": "ControlNet Canny",
+      "model_type": "controlnet",
+      "source": "huggingface",
+      "repo_id": "lllyasviel/sd-controlnet-canny"
+    },
+    {
+      "name": "VAE",
+      "model_type": "vae",
+      "source": "huggingface",
+      "repo_id": "stabilityai/sd-vae-ft-mse"
+    }
+  ],
+  "settings": {
+    "download_timeout": 600,
+    "max_retries": 3,
+    "verify_hashes": true,
+    "create_backups": false,
+    "civitai_api_key": null
+  }
+}

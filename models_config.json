@@ -1,0 +1,29 @@
+{
+  "downloads": [
+    {
+      "name": "Stable Diffusion v1.5",
+      "model_type": "checkpoints",
+      "source": "huggingface",
+      "repo_id": "runwayml/stable-diffusion-v1-5",
+      "filename": "v1-5-pruned-emaonly.safetensors"
+    },
+    {
+      "name": "Stable Diffusion VAE",
+      "model_type": "vae",
+      "source": "huggingface",
+      "repo_id": "stabilityai/sd-vae-ft-mse"
+    },
+    {
+      "name": "ControlNet Canny",
+      "model_type": "controlnet",
+      "source": "huggingface",
+      "repo_id": "lllyasviel/sd-controlnet-canny"
+    }
+  ],
+  "settings": {
+    "download_timeout": 600,
+    "max_retries": 3,
+    "verify_hashes": true,
+    "create_backups": false
+  }
+}
