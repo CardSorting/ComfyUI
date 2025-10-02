@@ -172,12 +172,16 @@ class PromptServer():
         self.app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
         self.sockets = dict()
         self.sockets_metadata = dict()
-        self.web_root = (
-            FrontendManager.init_frontend(args.front_end_version)
-            if args.front_end_root is None
-            else args.front_end_root
-        )
-        logging.info(f"[Prompt Server] web root: {self.web_root}")
+        if args.headless:
+            self.web_root = None
+            logging.info("[Prompt Server] Running in headless mode - no web UI will be served")
+        else:
+            self.web_root = (
+                FrontendManager.init_frontend(args.front_end_version)
+                if args.front_end_root is None
+                else args.front_end_root
+            )
+            logging.info(f"[Prompt Server] web root: {self.web_root}")
         routes = web.RouteTableDef()
         self.routes = routes
         self.last_node_id = None
@@ -247,11 +251,24 @@ class PromptServer():
 
         @routes.get("/")
         async def get_root(request):
-            response = web.FileResponse(os.path.join(self.web_root, "index.html"))
-            response.headers['Cache-Control'] = 'no-cache'
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-            return response
+            if args.headless:
+                return web.json_response({
+                    "message": "ComfyUI is running in headless mode",
+                    "version": __version__,
+                    "api_endpoints": {
+                        "prompt": "/prompt",
+                        "queue": "/queue", 
+                        "history": "/history",
+                        "object_info": "/object_info",
+                        "system_stats": "/system_stats"
+                    }
+                })
+            else:
+                response = web.FileResponse(os.path.join(self.web_root, "index.html"))
+                response.headers['Cache-Control'] = 'no-cache'
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
 
         @routes.get("/embeddings")
         def get_embeddings(request):
@@ -813,26 +830,28 @@ class PromptServer():
         self.app.add_routes(api_routes)
         self.app.add_routes(self.routes)
 
-        # Add routes from web extensions.
-        for name, dir in nodes.EXTENSION_WEB_DIRS.items():
-            self.app.add_routes([web.static('/extensions/' + name, dir)])
+        # Only add UI-related routes if not in headless mode
+        if not args.headless:
+            # Add routes from web extensions.
+            for name, dir in nodes.EXTENSION_WEB_DIRS.items():
+                self.app.add_routes([web.static('/extensions/' + name, dir)])
 
-        workflow_templates_path = FrontendManager.templates_path()
-        if workflow_templates_path:
+            workflow_templates_path = FrontendManager.templates_path()
+            if workflow_templates_path:
+                self.app.add_routes([
+                    web.static('/templates', workflow_templates_path)
+                ])
+
+            # Serve embedded documentation from the package
+            embedded_docs_path = FrontendManager.embedded_docs_path()
+            if embedded_docs_path:
+                self.app.add_routes([
+                    web.static('/docs', embedded_docs_path)
+                ])
+
             self.app.add_routes([
-                web.static('/templates', workflow_templates_path)
+                web.static('/', self.web_root),
             ])
-
-        # Serve embedded documentation from the package
-        embedded_docs_path = FrontendManager.embedded_docs_path()
-        if embedded_docs_path:
-            self.app.add_routes([
-                web.static('/docs', embedded_docs_path)
-            ])
-
-        self.app.add_routes([
-            web.static('/', self.web_root),
-        ])
 
     def get_queue_info(self):
         prompt_info = {}
@@ -987,7 +1006,11 @@ class PromptServer():
                 address_print = address
 
             if verbose:
-                logging.info("To see the GUI go to: {}://{}:{}".format(scheme, address_print, port))
+                if args.headless:
+                    logging.info("ComfyUI is running in headless mode at: {}://{}:{}".format(scheme, address_print, port))
+                    logging.info("API endpoints are available at: {}://{}:{}/api/".format(scheme, address_print, port))
+                else:
+                    logging.info("To see the GUI go to: {}://{}:{}".format(scheme, address_print, port))
 
         if call_on_start is not None:
             call_on_start(scheme, self.address, self.port)

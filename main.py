@@ -334,7 +334,7 @@ def start_comfyui(asyncio_loop=None):
 
     os.makedirs(folder_paths.get_temp_directory(), exist_ok=True)
     call_on_start = None
-    if args.auto_launch:
+    if args.auto_launch and not args.headless:
         def startup_server(scheme, address, port):
             import webbrowser
             if os.name == 'nt' and address == '0.0.0.0':
