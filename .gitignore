@@ -5,7 +5,14 @@ __pycache__/
 !/input/example.png
 /models/
 /temp/
-/custom_nodes/
+# Custom nodes - allow tracking of source code and configs, exclude large files
+/custom_nodes/**/*.safetensors
+/custom_nodes/**/*.pt
+/custom_nodes/**/*.pth
+/custom_nodes/**/*.bin
+/custom_nodes/**/*.ckpt
+/custom_nodes/**/__pycache__/
+/custom_nodes/**/.git/
 !custom_nodes/example_node.py.example
 extra_model_paths.yaml
 /.vs
