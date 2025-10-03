@@ -1,3 +1,11 @@
+# Load environment variables FIRST, before any other imports
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, continue without .env support
+    pass
+
 import comfy.options
 comfy.options.enable_args_parsing()
 
@@ -14,6 +22,99 @@ import sys
 from comfy_execution.progress import get_progress_state
 from comfy_execution.utils import get_executing_context
 from comfy_api import feature_flags
+
+# Fix broken pipe errors in headless mode by configuring TQDM and progress bars
+def configure_headless_progress():
+    """Configure progress bars and TQDM for headless mode to prevent broken pipe errors"""
+    # Check if we're in headless mode
+    is_headless = (
+        args.headless or 
+        os.environ.get('COMFYUI_HEADLESS', '').lower() in ('1', 'true', 'yes') or
+        os.environ.get('DISABLE_PROGRESS_BARS', '').lower() in ('1', 'true', 'yes')
+    )
+    
+    if is_headless:
+        # Set TQDM environment variables to disable progress bars
+        tqdm_env_vars = {
+            'TQDM_DISABLE': '1',
+            'TQDM_DISABLE_PROGRESS_BAR': '1',
+            'TQDM_MINITERS': '0',
+            'TQDM_MAXITERS': '0',
+            'TQDM_POSITION': '0',
+            'TQDM_LEAVE': 'false',
+            'TQDM_NCOLS': '0',
+            'TQDM_DESC': '',
+            'TQDM_UNIT': '',
+            'TQDM_UNIT_SCALE': 'false',
+            'TQDM_RATE': '0',
+            'TQDM_POSTFIX': '',
+            'TQDM_BAR_FORMAT': '',
+            'TQDM_SMOOTHING': '0',
+            'TQDM_DYNAMIC_NCOLS': 'false',
+            'TQDM_ASCII': 'true',
+            'TQDM_DISABLE_TQDM': '1'
+        }
+        
+        for key, value in tqdm_env_vars.items():
+            if key not in os.environ:
+                os.environ[key] = value
+        
+        # Disable ComfyUI's progress bar system
+        import comfy.utils
+        comfy.utils.set_progress_bar_enabled(False)
+        
+        # Monkey patch TQDM to prevent broken pipe errors
+        try:
+            import tqdm
+            from tqdm import tqdm as tqdm_class
+            
+            # Create a no-op tqdm class for headless mode
+            class NoOpTqdm:
+                def __init__(self, *args, **kwargs):
+                    self.n = 0
+                    self.total = kwargs.get('total', 1)
+                    self.desc = kwargs.get('desc', '')
+                    self.unit = kwargs.get('unit', '')
+                    self.leave = kwargs.get('leave', False)
+                    self.position = kwargs.get('position', 0)
+                    self.disable = True
+                
+                def update(self, n=1):
+                    self.n += n
+                    return self
+                
+                def close(self):
+                    pass
+                
+                def __enter__(self):
+                    return self
+                
+                def __exit__(self, *args):
+                    pass
+                
+                def __iter__(self):
+                    return iter(range(self.total))
+            
+            # Replace tqdm with no-op version
+            tqdm.tqdm = NoOpTqdm
+            tqdm.trange = lambda *args, **kwargs: NoOpTqdm(*args, **kwargs)
+            
+            # Also patch the module-level functions
+            import tqdm
+            tqdm.tqdm = NoOpTqdm
+            tqdm.trange = lambda *args, **kwargs: NoOpTqdm(*args, **kwargs)
+            
+            logging.info("✅ TQDM progress bars disabled for headless mode")
+            
+        except ImportError:
+            logging.warning("⚠️  TQDM not available, skipping progress bar monkey patch")
+        except Exception as e:
+            logging.warning(f"⚠️  Error patching TQDM: {e}")
+        
+        logging.info("🎯 Headless mode: Progress bars and TQDM disabled to prevent broken pipe errors")
+
+# Configure headless progress before any other imports that might use TQDM
+configure_headless_progress()
 
 if __name__ == "__main__":
     #NOTE: These do not do anything on core ComfyUI, they are for custom nodes.
@@ -274,6 +375,19 @@ def hijack_progress(server_instance):
                 )
 
     comfy.utils.set_progress_bar_global_hook(hook)
+    
+    # Register headless progress handler if in headless mode
+    is_headless = (
+        args.headless or 
+        os.environ.get('COMFYUI_HEADLESS', '').lower() in ('1', 'true', 'yes') or
+        os.environ.get('DISABLE_PROGRESS_BARS', '').lower() in ('1', 'true', 'yes')
+    )
+    
+    if is_headless:
+        from comfy_execution.progress import HeadlessProgressHandler, add_progress_handler
+        headless_handler = HeadlessProgressHandler()
+        add_progress_handler(headless_handler)
+        logging.info("✅ Headless progress handler registered")
 
 
 def cleanup_temp():

@@ -77,6 +77,51 @@ class ProgressHandler(ABC):
         self.enabled = False
 
 
+class HeadlessProgressHandler(ProgressHandler):
+    """
+    Handler for headless mode that logs progress without using TQDM to prevent broken pipe errors.
+    """
+
+    def __init__(self):
+        super().__init__("headless")
+        self.progress_logged: Dict[str, float] = {}
+
+    @override
+    def start_handler(self, node_id: str, state: NodeProgressState, prompt_id: str):
+        import logging
+        logging.info(f"🚀 Starting node {node_id} (max: {state['max']})")
+
+    @override
+    def update_handler(
+        self,
+        node_id: str,
+        value: float,
+        max_value: float,
+        state: NodeProgressState,
+        prompt_id: str,
+        image: PreviewImageTuple | None = None,
+    ):
+        # Only log progress at 25%, 50%, 75%, and 100% to avoid spam
+        progress_percent = (value / max_value) * 100 if max_value > 0 else 0
+        last_logged = self.progress_logged.get(node_id, -1)
+        
+        if progress_percent >= 100 or progress_percent - last_logged >= 25:
+            import logging
+            logging.info(f"📊 Node {node_id}: {progress_percent:.1f}% ({value}/{max_value})")
+            self.progress_logged[node_id] = progress_percent
+
+    @override
+    def finish_handler(self, node_id: str, state: NodeProgressState, prompt_id: str):
+        import logging
+        logging.info(f"✅ Completed node {node_id}")
+        if node_id in self.progress_logged:
+            del self.progress_logged[node_id]
+
+    @override
+    def reset(self):
+        self.progress_logged.clear()
+
+
 class CLIProgressHandler(ProgressHandler):
     """
     Handler that displays progress using tqdm progress bars in the CLI.
@@ -85,6 +130,18 @@ class CLIProgressHandler(ProgressHandler):
     def __init__(self):
         super().__init__("cli")
         self.progress_bars: Dict[str, tqdm] = {}
+        
+        # Check if we should disable progress bars in headless mode
+        import os
+        from comfy.cli_args import args
+        is_headless = (
+            args.headless or 
+            os.environ.get('COMFYUI_HEADLESS', '').lower() in ('1', 'true', 'yes') or
+            os.environ.get('DISABLE_PROGRESS_BARS', '').lower() in ('1', 'true', 'yes')
+        )
+        
+        if is_headless:
+            self.enabled = False
 
     @override
     def start_handler(self, node_id: str, state: NodeProgressState, prompt_id: str):

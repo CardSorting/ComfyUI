@@ -18,6 +18,7 @@ Pillow
 scipy
 tqdm
 psutil
+python-dotenv>=1.0.0
 alembic
 SQLAlchemy
 av>=14.2.0
