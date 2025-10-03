@@ -1,0 +1,42 @@
+[Unit]
+Description=ComfyUI Headless Service
+Documentation=https://github.com/comfyanonymous/ComfyUI
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=user
+Group=user
+WorkingDirectory=/home/user/Documents/ComfyUI
+ExecStart=/home/user/Documents/ComfyUI/start_comfyui_headless.sh start
+ExecStop=/home/user/Documents/ComfyUI/start_comfyui_headless.sh stop
+ExecReload=/home/user/Documents/ComfyUI/start_comfyui_headless.sh restart
+PIDFile=/home/user/Documents/ComfyUI/comfyui_headless.pid
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=TQDM_DISABLE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=DISABLE_PROGRESS_BARS=true
+Environment=DISABLE_AUTO_LAUNCH=true
+Environment=DONT_PRINT_SERVER=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/user/Documents/ComfyUI
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
