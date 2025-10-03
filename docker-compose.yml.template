@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  comfyui:
+    build: .
+    container_name: comfyui-headless
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./models:/app/models
+      - ./output:/app/output
+      - ./input:/app/input
+      - ./custom_nodes:/app/custom_nodes
+    environment:
+      - COMFYUI_PORT=8188
+      - HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN:-}
+      - CIVITAI_API_KEY=${CIVITAI_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Redis for queue management
+  redis:
+    image: redis:7-alpine
+    container_name: comfyui-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

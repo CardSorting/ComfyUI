@@ -21,18 +21,22 @@ echo "  search QUERY [--model-type TYPE]      Search for models on Hugging Face"
 echo "  popular [--model-type TYPE]           List popular models"
 echo "  batch [CONFIG_FILE]                   Batch download from config file"
 echo "  civitai [COMMAND]                     Civitai-specific commands"
+echo "  huggingface [COMMAND]                 Hugging Face-specific commands"
 echo "  install-deps                          Install required dependencies"
     echo ""
 echo "Download Options:"
-echo "  --model-type TYPE                     Model type (auto-detected for Civitai URLs)"
+echo "  --model-type TYPE                     Model type (auto-detected for Civitai/Hugging Face URLs)"
 echo "  --source SOURCE                       Source (huggingface, url, civitai)"
 echo "  --repo REPO_ID                        Hugging Face repository ID"
 echo "  --url URL                             Direct download URL"
 echo "  --model-id ID                         Civitai model ID"
 echo "  --version-id ID                       Civitai version ID"
 echo "  --civitai-url URL                     Civitai URL (auto-extracts IDs)"
+echo "  --huggingface-url URL                 Hugging Face URL (auto-extracts repo info)"
+echo "  --branch BRANCH                       Hugging Face branch (default: main)"
 echo "  --filename FILENAME                   Specific filename to download"
-echo "  --api-key KEY                         API key for authentication"
+echo "  --api-key KEY                         API key for authentication (Civitai)"
+echo "  --hf-token TOKEN                      Hugging Face API token"
     echo ""
 echo "Examples:"
 echo "  $0 list"
@@ -41,10 +45,13 @@ echo "  $0 download --model-type checkpoints --source huggingface --repo runwaym
 echo "  $0 download --model-type checkpoints --source civitai --model-id 12345"
 echo "  $0 download --source civitai --civitai-url \"https://civitai.com/models/12345/model-name\""
 echo "  $0 download --source url --url \"https://civitai.com/models/12345/model-name\""
+echo "  $0 download --source url --url \"https://huggingface.co/runwayml/stable-diffusion-v1-5\""
 echo "  $0 search \"stable diffusion\" --limit 5"
 echo "  $0 popular --model-type checkpoints"
 echo "  $0 civitai search \"anime\" --limit 5"
 echo "  $0 civitai types"
+echo "  $0 huggingface search \"stable diffusion\" --limit 5"
+echo "  $0 huggingface types"
 echo "  $0 batch models_config.json"
     echo ""
 }
@@ -113,7 +120,11 @@ case "${1:-}" in
         ;;
     "civitai")
         shift
-        python "$PYTHON_SCRIPT" civitai "$@"
+        python3 "$PYTHON_SCRIPT" civitai "$@"
+        ;;
+    "huggingface")
+        shift
+        python3 "$PYTHON_SCRIPT" huggingface "$@"
         ;;
     "install-deps")
         install_deps

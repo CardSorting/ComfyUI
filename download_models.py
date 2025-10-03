@@ -45,13 +45,15 @@ except ImportError:
     CIVITAI_AVAILABLE = False
     print("Warning: Civitai integration not available. Install with: pip install requests")
 
-# Try to import huggingface_hub if available
+# Try to import Hugging Face integration
 try:
-    from huggingface_hub import hf_hub_download, list_repo_files, HfApi
+    from huggingface_integration import HuggingFaceModelManager
     HF_AVAILABLE = True
 except ImportError:
     HF_AVAILABLE = False
-    print("Warning: huggingface_hub not available. Install with: pip install huggingface_hub")
+    print("Warning: Hugging Face integration not available. Install with: pip install huggingface_hub")
+
+# Note: HF_AVAILABLE is set above in the HuggingFaceModelManager import
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -184,9 +186,18 @@ class ModelDownloader:
                     manager = CivitaiModelManager()
                     return manager.download_from_url(url)
             
-            # For non-Civitai URLs, model_type is required
+            # Check if this is a Hugging Face URL and handle it specially
+            if HF_AVAILABLE:
+                from huggingface_integration import HuggingFaceURLParser
+                url_parser = HuggingFaceURLParser()
+                if url_parser.is_huggingface_url(url):
+                    logger.info("🔍 Detected Hugging Face URL, using Hugging Face integration with auto-detection...")
+                    manager = HuggingFaceModelManager()
+                    return manager.download_from_url(url)
+            
+            # For other URLs, model_type is required
             if not model_type:
-                logger.error("Model type is required for non-Civitai URLs. Use --model-type or provide a Civitai URL for auto-detection.")
+                logger.error("Model type is required for non-Civitai/Hugging Face URLs. Use --model-type or provide a supported URL for auto-detection.")
                 return False
             
             # Get model directory
@@ -233,6 +244,30 @@ class ModelDownloader:
             logger.error(f"Failed to download from Civitai: {e}")
             return False
     
+    def download_from_huggingface(self, repo_id: Optional[str] = None, branch: Optional[str] = None,
+                                 api_token: Optional[str] = None, url: Optional[str] = None) -> bool:
+        """Download model from Hugging Face."""
+        if not HF_AVAILABLE:
+            logger.error("Hugging Face integration not available. Install with: pip install huggingface_hub")
+            return False
+        
+        try:
+            manager = HuggingFaceModelManager(api_token)
+            
+            # If URL is provided, use URL-based download
+            if url:
+                return manager.download_from_url(url)
+            
+            # Otherwise use repo_id
+            if not repo_id:
+                logger.error("Either repo_id or url must be provided for Hugging Face download")
+                return False
+            
+            return manager.download_model(repo_id, branch or 'main')
+        except Exception as e:
+            logger.error(f"Failed to download from Hugging Face: {e}")
+            return False
+    
     def search_civitai_models(self, query: str, model_type: Optional[str] = None, 
                              limit: int = 10, api_key: Optional[str] = None) -> List[Dict]:
         """Search for models on Civitai."""
@@ -245,6 +280,19 @@ class ModelDownloader:
             return manager.search_and_download(query, model_type, limit)
         except Exception as e:
             logger.error(f"Failed to search Civitai models: {e}")
+            return []
+    
+    def search_huggingface_models(self, query: str, limit: int = 10, api_token: Optional[str] = None) -> List[Dict]:
+        """Search for models on Hugging Face."""
+        if not HF_AVAILABLE:
+            logger.error("Hugging Face integration not available. Install with: pip install huggingface_hub")
+            return []
+        
+        try:
+            manager = HuggingFaceModelManager(api_token)
+            return manager.search_models(query, limit)
+        except Exception as e:
+            logger.error(f"Failed to search Hugging Face models: {e}")
             return []
     
     def list_available_models(self, model_type: Optional[str] = None) -> None:
@@ -353,13 +401,16 @@ Examples:
     download_parser.add_argument('--source', required=True, choices=['huggingface', 'url', 'civitai'],
                                help='Source to download from')
     download_parser.add_argument('--repo', help='Hugging Face repository ID (for huggingface source)')
+    download_parser.add_argument('--branch', help='Hugging Face branch (default: main)')
     download_parser.add_argument('--url', help='Direct URL to download from (for url source)')
     download_parser.add_argument('--model-id', type=int, help='Civitai model ID (for civitai source)')
     download_parser.add_argument('--version-id', type=int, help='Civitai version ID (for civitai source)')
     download_parser.add_argument('--civitai-url', help='Civitai URL (for civitai source) - automatically extracts model/version IDs')
+    download_parser.add_argument('--huggingface-url', help='Hugging Face URL (for huggingface source) - automatically extracts repo info')
     download_parser.add_argument('--filename', help='Specific filename to download')
     download_parser.add_argument('--hash', help='Expected SHA-256 hash for verification')
     download_parser.add_argument('--api-key', help='API key for authentication (Civitai)')
+    download_parser.add_argument('--hf-token', help='Hugging Face API token for authentication')
     
     # Info command
     info_parser = subparsers.add_parser('info', help='Get information about a model')
@@ -382,6 +433,20 @@ Examples:
         
         # List types command
         types_parser = civitai_subparsers.add_parser('types', help='List Civitai model types')
+    
+    # Hugging Face commands
+    if HF_AVAILABLE:
+        hf_parser = subparsers.add_parser('huggingface', help='Hugging Face-specific commands')
+        hf_subparsers = hf_parser.add_subparsers(dest='hf_command', help='Hugging Face commands')
+        
+        # Search command
+        hf_search_parser = hf_subparsers.add_parser('search', help='Search Hugging Face models')
+        hf_search_parser.add_argument('--query', required=True, help='Search query')
+        hf_search_parser.add_argument('--limit', type=int, default=10, help='Maximum number of results')
+        hf_search_parser.add_argument('--hf-token', help='Hugging Face API token')
+        
+        # List types command
+        hf_types_parser = hf_subparsers.add_parser('types', help='List Hugging Face model type patterns')
     
     args = parser.parse_args()
     
@@ -408,6 +473,12 @@ Examples:
                 logger.error("--url is required for url source")
                 return
             success = downloader.download_from_url(args.url, args.model_type, args.filename)
+        
+        elif args.source == 'huggingface':
+            if not args.repo and not args.huggingface_url:
+                logger.error("Either --repo or --huggingface-url is required for huggingface source")
+                return
+            success = downloader.download_from_huggingface(args.repo, args.branch, args.hf_token, args.huggingface_url)
         
         elif args.source == 'civitai':
             if not args.model_id and not args.civitai_url:
@@ -452,8 +523,37 @@ Examples:
         else:
             civitai_parser.print_help()
     
+    elif args.command == 'huggingface' and HF_AVAILABLE:
+        if args.hf_command == 'search':
+            results = downloader.search_huggingface_models(args.query, args.limit, args.hf_token)
+            if results:
+                print(f"Found {len(results)} models on Hugging Face")
+                for model in results:
+                    print(f"  {model['id']} - {model['downloads']} downloads, {model['likes']} likes")
+                    print(f"    URL: {model['url']}")
+                    if model['tags']:
+                        print(f"    Tags: {', '.join(model['tags'][:5])}")
+                    print()
+            else:
+                print("No models found")
+        
+        elif args.hf_command == 'types':
+            if HF_AVAILABLE:
+                manager = HuggingFaceModelManager()
+                print("Hugging Face model type patterns:")
+                for pattern, comfyui_type in manager.list_model_types().items():
+                    print(f"  {pattern} -> {comfyui_type}")
+            else:
+                print("Hugging Face integration not available")
+        
+        else:
+            hf_parser.print_help()
+    
     elif args.command == 'civitai' and not CIVITAI_AVAILABLE:
         logger.error("Civitai integration not available. Install with: pip install requests")
+    
+    elif args.command == 'huggingface' and not HF_AVAILABLE:
+        logger.error("Hugging Face integration not available. Install with: pip install huggingface_hub")
 
 if __name__ == '__main__':
     main()

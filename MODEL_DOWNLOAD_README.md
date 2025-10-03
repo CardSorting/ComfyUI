@@ -13,8 +13,10 @@ This tool provides a command-line interface for downloading models to ComfyUI, d
 - **Model Discovery**: Search and list available models from multiple sources
 - **Metadata Extraction**: Extract model information and metadata
 - **Civitai Integration**: Full support for Civitai models with automatic type detection
-- **Smart URL Detection**: Automatically detects Civitai URLs and extracts model/version IDs
+- **Hugging Face Integration**: Full support for Hugging Face models including segmented/multi-part models
+- **Smart URL Detection**: Automatically detects Civitai and Hugging Face URLs and extracts relevant IDs
 - **Automatic Model Type Detection**: No need to specify model types - the tool automatically detects and places models in correct directories
+- **Segmented Model Support**: Handles large models split into multiple files (e.g., "model-00001-of-00050.safetensors")
 
 ## Installation
 
@@ -63,8 +65,9 @@ chmod +x download_models.sh
 # Download specific version from Civitai
 ./download_models.sh download --source civitai --model-id 257749 --version-id 290640
 
-# Automatic URL detection (works with any Civitai URL - no model type needed!)
+# Automatic URL detection (works with any Civitai or Hugging Face URL - no model type needed!)
 ./download_models.sh download --source url --url "https://civitai.com/models/257749/pony-diffusion-v6-xl"
+./download_models.sh download --source url --url "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"
 
 # Download from direct URL
 ./download_models.sh download --model-type loras --source url --url https://example.com/model.safetensors
@@ -80,6 +83,9 @@ chmod +x download_models.sh
 # Search Civitai for models
 ./download_models.sh civitai search "anime" --limit 5
 
+# Search Hugging Face for models
+./download_models.sh huggingface search "stable diffusion" --limit 5
+
 # Search with model type filter
 ./download_models.sh search "controlnet" --model-type controlnet --limit 10
 ```
@@ -94,6 +100,9 @@ chmod +x download_models.sh
 
 # List Civitai model type mappings
 ./download_models.sh civitai types
+
+# List Hugging Face model type patterns
+./download_models.sh huggingface types
 ```
 
 #### Batch Downloads
@@ -257,6 +266,15 @@ Run with verbose logging:
 python download_models.py --verbose download --model-type checkpoints --source huggingface --repo runwayml/stable-diffusion-v1-5
 ```
 
+## Documentation
+
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete user guide with setup instructions and examples
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Quick reference card for common commands
+- **[DOCKER_HEADLESS_SETUP.md](DOCKER_HEADLESS_SETUP.md)** - Docker setup guide for headless ComfyUI
+- **[CIVITAI_INTEGRATION_README.md](CIVITAI_INTEGRATION_README.md)** - Civitai-specific documentation
+- **[HUGGINGFACE_INTEGRATION_SUMMARY.md](HUGGINGFACE_INTEGRATION_SUMMARY.md)** - Hugging Face documentation
+- **[HUGGINGFACE_FILE_ORGANIZATION_FIX.md](HUGGINGFACE_FILE_ORGANIZATION_FIX.md)** - File organization details
+
 ## File Structure
 
 ```
@@ -264,13 +282,43 @@ ComfyUI/
 ├── download_models.py              # Basic download tool
 ├── download_models_advanced.py     # Advanced features
 ├── civitai_integration.py          # Civitai integration module
+├── huggingface_integration.py      # Hugging Face integration module
 ├── download_models.sh              # Wrapper script
+├── docker_management.sh            # Docker management script
 ├── requirements-download.txt       # Dependencies
 ├── models_config.json             # Sample batch config
 ├── civitai_models_config.json     # Civitai batch config
+├── docker-compose.yml.template    # Docker Compose template
+├── Dockerfile.template            # Dockerfile template
+├── env.template                   # Environment variables template
+├── USER_GUIDE.md                  # Complete user guide
+├── QUICK_REFERENCE.md             # Quick reference card
+├── DOCKER_HEADLESS_SETUP.md       # Docker setup guide
 ├── MODEL_DOWNLOAD_README.md       # This file
-└── CIVITAI_INTEGRATION_README.md  # Civitai-specific documentation
+├── CIVITAI_INTEGRATION_README.md  # Civitai-specific documentation
+├── HUGGINGFACE_INTEGRATION_SUMMARY.md  # Hugging Face documentation
+└── HUGGINGFACE_FILE_ORGANIZATION_FIX.md  # File organization details
 ```
+
+## Docker Integration
+
+### Quick Docker Setup
+
+```bash
+# Setup Docker environment
+./docker_management.sh setup
+
+# Start ComfyUI in Docker
+./docker_management.sh start
+
+# Download models in Docker
+./docker_management.sh download --source url --url "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0"
+
+# Check status
+./docker_management.sh status
+```
+
+For detailed Docker setup instructions, see [DOCKER_HEADLESS_SETUP.md](DOCKER_HEADLESS_SETUP.md).
 
 ## Integration with Headless ComfyUI
 
@@ -289,9 +337,13 @@ COPY models_config.json /app/
 RUN python download_models.py batch-download --config models_config.json
 ```
 
-## Civitai Integration
+## Platform Integrations
 
+### Civitai Integration
 For detailed information about Civitai integration, see [CIVITAI_INTEGRATION_README.md](CIVITAI_INTEGRATION_README.md).
+
+### Hugging Face Integration
+For detailed information about Hugging Face integration, see [HUGGINGFACE_INTEGRATION_SUMMARY.md](HUGGINGFACE_INTEGRATION_SUMMARY.md).
 
 ### Quick Civitai Setup
 ```bash
