@@ -78,19 +78,18 @@ image = (
         "soundfile",
         "pydantic~=2.0",
         "pydantic-settings~=2.0",
-        # Custom node dependencies (from Impact Pack requirements)
-        "opencv-python-headless",  # Image processing (cv2)
-        "scikit-image",            # Image processing
-        "piexif",                  # EXIF metadata handling
-        "matplotlib",              # Visualization
-        "dill",                    # Object serialization
-        "ultralytics>=8.3.162",    # YOLO models (Impact Subpack)
-        "segment-anything",        # SAM segmentation
+        # Note: Custom node dependencies removed for clean deployment
+        # To enable custom nodes, uncomment these and set args.disable_all_custom_nodes = False
+        # "opencv-python-headless",
+        # "scikit-image",
+        # "piexif",
+        # "matplotlib",
+        # "dill",
+        # "ultralytics>=8.3.162",
+        # "segment-anything",
     )
-    # Install SAM2 from GitHub (required by Impact Pack)
-    .run_commands(
-        "pip install git+https://github.com/facebookresearch/sam2"
-    )
+    # Note: SAM2 installation removed (only needed for Impact Pack custom nodes)
+    # .run_commands("pip install git+https://github.com/facebookresearch/sam2")
     # Add the entire ComfyUI codebase to the image
     .add_local_dir(".", remote_path="/app")
 )
@@ -154,6 +153,7 @@ def web():
     args.listen = "0.0.0.0"
     args.port = 8000
     args.dont_print_server = False
+    args.disable_all_custom_nodes = True  # Disable custom nodes for clean deployment
     
     # Set model paths to use persistent volumes
     os.environ['COMFYUI_MODEL_PATH'] = '/models'
