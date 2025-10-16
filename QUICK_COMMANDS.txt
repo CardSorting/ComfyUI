@@ -1,0 +1,113 @@
+═══════════════════════════════════════════════════════════════
+ComfyUI on Modal - Quick Commands Cheat Sheet
+═══════════════════════════════════════════════════════════════
+
+📝 SETUP (ONE TIME)
+═══════════════════════════════════════════════════════════════
+
+Run the setup wizard (EASIEST):
+  python modal_setup_wizard.py
+
+Or do it manually:
+  pip install modal          # Install Modal CLI
+  modal setup                # Login to Modal
+
+═══════════════════════════════════════════════════════════════
+🚀 DEPLOY
+═══════════════════════════════════════════════════════════════
+
+Deploy ComfyUI:
+  modal deploy modal_app.py
+
+Update deployment:
+  modal deploy modal_app.py
+
+Stop deployment:
+  modal app stop comfyui
+
+═══════════════════════════════════════════════════════════════
+📦 MODELS
+═══════════════════════════════════════════════════════════════
+
+Download models from URLs:
+  modal run modal_app.py::download_models
+
+Check what models you have:
+  modal volume ls comfyui-models /checkpoints
+  modal volume ls comfyui-models /loras
+  modal volume ls comfyui-models /vae
+
+Upload model from your computer:
+  modal volume put comfyui-models model.safetensors /checkpoints/model.safetensors
+
+Download model from Modal:
+  modal volume get comfyui-models /checkpoints/model.safetensors ./model.safetensors
+
+═══════════════════════════════════════════════════════════════
+🔍 MONITORING
+═══════════════════════════════════════════════════════════════
+
+View logs (live):
+  modal app logs comfyui --follow
+
+View logs (last 100 lines):
+  modal app logs comfyui
+
+Check deployment status:
+  modal app list
+  modal app show comfyui
+
+═══════════════════════════════════════════════════════════════
+🧪 TESTING
+═══════════════════════════════════════════════════════════════
+
+Test if API is responding:
+  curl https://YOUR-ENDPOINT/system_stats
+
+Run test script:
+  python modal_test.py https://YOUR-ENDPOINT
+
+═══════════════════════════════════════════════════════════════
+📁 VOLUMES
+═══════════════════════════════════════════════════════════════
+
+List all volumes:
+  modal volume list
+
+Browse volume contents:
+  modal volume ls comfyui-models
+  modal volume ls comfyui-models /checkpoints
+
+Delete files from volume:
+  modal volume rm comfyui-models /checkpoints/old_model.safetensors
+
+═══════════════════════════════════════════════════════════════
+💡 USEFUL ONE-LINERS
+═══════════════════════════════════════════════════════════════
+
+Deploy and watch logs:
+  modal deploy modal_app.py && modal app logs comfyui --follow
+
+Check total model storage:
+  modal volume ls comfyui-models -l
+
+Get your endpoint URL (after deploying):
+  modal app show comfyui | grep "Web endpoint"
+
+═══════════════════════════════════════════════════════════════
+🆘 HELP
+═══════════════════════════════════════════════════════════════
+
+Run setup wizard:
+  python modal_setup_wizard.py
+
+Get Modal help:
+  modal --help
+  modal deploy --help
+
+Open documentation:
+  open START_HERE.md
+  open MODAL_QUICKSTART.md
+
+═══════════════════════════════════════════════════════════════
+

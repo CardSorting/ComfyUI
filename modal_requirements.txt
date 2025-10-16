@@ -1,0 +1,5 @@
+# Modal Development Requirements
+# Install these locally to work with Modal deployment
+
+modal>=0.63.0
+

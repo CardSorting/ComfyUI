@@ -1,0 +1,73 @@
+{
+  "_comment": "This is a minimal example workflow structure for ComfyUI",
+  "_note": "Replace this with your actual workflow exported from ComfyUI",
+  "_export_instructions": [
+    "1. Create your workflow in ComfyUI",
+    "2. Click 'Save (API Format)' or use Dev menu -> Save (API Format)",
+    "3. Use the exported JSON with your Modal deployment"
+  ],
+  "_example_usage": {
+    "curl": "curl -X POST https://your-endpoint.modal.run/prompt -H 'Content-Type: application/json' -d @workflow.json",
+    "python": "requests.post('https://your-endpoint.modal.run/prompt', json={'prompt': workflow})"
+  },
+  "workflow": {
+    "3": {
+      "inputs": {
+        "seed": 42,
+        "steps": 20,
+        "cfg": 8,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "model": ["4", 0],
+        "positive": ["6", 0],
+        "negative": ["7", 0],
+        "latent_image": ["5", 0]
+      },
+      "class_type": "KSampler"
+    },
+    "4": {
+      "inputs": {
+        "ckpt_name": "model.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "5": {
+      "inputs": {
+        "width": 512,
+        "height": 512,
+        "batch_size": 1
+      },
+      "class_type": "EmptyLatentImage"
+    },
+    "6": {
+      "inputs": {
+        "text": "beautiful landscape, detailed, high quality",
+        "clip": ["4", 1]
+      },
+      "class_type": "CLIPTextEncode"
+    },
+    "7": {
+      "inputs": {
+        "text": "ugly, blurry, low quality",
+        "clip": ["4", 1]
+      },
+      "class_type": "CLIPTextEncode"
+    },
+    "8": {
+      "inputs": {
+        "samples": ["3", 0],
+        "vae": ["4", 2]
+      },
+      "class_type": "VAEDecode"
+    },
+    "9": {
+      "inputs": {
+        "filename_prefix": "ComfyUI",
+        "images": ["8", 0]
+      },
+      "class_type": "SaveImage"
+    }
+  }
+}
+

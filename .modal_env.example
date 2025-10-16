@@ -1,0 +1,30 @@
+# Modal Environment Configuration Example
+# Copy this to .modal_env and customize for your deployment
+
+# GPU Configuration
+# Options: T4, A10G, A100
+MODAL_GPU_TYPE=A10G
+
+# Timeout settings (in seconds)
+MODAL_TIMEOUT=600
+MODAL_CONTAINER_IDLE_TIMEOUT=300
+
+# Model paths (optional - defaults to /models)
+# MODAL_MODEL_PATH=/models
+
+# Output paths (optional - defaults to /outputs)
+# MODAL_OUTPUT_PATH=/outputs
+
+# ComfyUI Configuration
+COMFYUI_HEADLESS=1
+DISABLE_PROGRESS_BARS=1
+
+# Telemetry (disabled by default)
+HF_HUB_DISABLE_TELEMETRY=1
+DO_NOT_TRACK=1
+
+# Optional: Custom model download URLs
+# Add your frequently used models here
+# MODEL_CHECKPOINT_URL=https://huggingface.co/.../model.safetensors
+# MODEL_VAE_URL=https://huggingface.co/.../vae.safetensors
+
