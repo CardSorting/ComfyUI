@@ -78,6 +78,15 @@ image = (
         "soundfile",
         "pydantic~=2.0",
         "pydantic-settings~=2.0",
+        # Custom node dependencies
+        "opencv-python-headless",  # For Impact Pack and other nodes
+        "scikit-image",            # For image processing nodes
+        "imageio",                 # For image I/O nodes
+        "matplotlib",              # For visualization nodes
+        "numba",                   # For performance-critical nodes
+        "onnxruntime",             # For ONNX model nodes
+        "insightface",             # For face-related nodes
+        "segment-anything",        # For segmentation nodes (if used)
     )
     # Add the entire ComfyUI codebase to the image
     .add_local_dir(".", remote_path="/app")
