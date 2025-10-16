@@ -78,15 +78,18 @@ image = (
         "soundfile",
         "pydantic~=2.0",
         "pydantic-settings~=2.0",
-        # Custom node dependencies
-        "opencv-python-headless",  # For Impact Pack and other nodes
-        "scikit-image",            # For image processing nodes
-        "imageio",                 # For image I/O nodes
-        "matplotlib",              # For visualization nodes
-        "numba",                   # For performance-critical nodes
-        "onnxruntime",             # For ONNX model nodes
-        "insightface",             # For face-related nodes
-        "segment-anything",        # For segmentation nodes (if used)
+        # Custom node dependencies (from Impact Pack requirements)
+        "opencv-python-headless",  # Image processing (cv2)
+        "scikit-image",            # Image processing
+        "piexif",                  # EXIF metadata handling
+        "matplotlib",              # Visualization
+        "dill",                    # Object serialization
+        "ultralytics>=8.3.162",    # YOLO models (Impact Subpack)
+        "segment-anything",        # SAM segmentation
+    )
+    # Install SAM2 from GitHub (required by Impact Pack)
+    .run_commands(
+        "pip install git+https://github.com/facebookresearch/sam2"
     )
     # Add the entire ComfyUI codebase to the image
     .add_local_dir(".", remote_path="/app")
@@ -97,36 +100,37 @@ image = (
 models_volume = modal.Volume.from_name("comfyui-models", create_if_missing=True)
 outputs_volume = modal.Volume.from_name("comfyui-outputs", create_if_missing=True)
 
-# GPU configuration - choose based on your needs:
-# GPU_CONFIG = modal.gpu.A10G()        # Budget option (~$0.60/hour)
-# GPU_CONFIG = modal.gpu.A10G()      # Balanced option (~$1.10/hour)
-# GPU_CONFIG = modal.gpu.A10G()      # High performance (~$4.00/hour)
-# GPU_CONFIG = modal.gpu.A100(count=2)  # Multi-GPU setup
-GPU_CONFIG = modal.gpu.A10G()  # Default: A10G - good balance of performance and cost
+# GPU configuration - choose based on your needs (Modal 1.2.0+ uses string format):
+# GPU_CONFIG = "T4"        # Budget option (~$0.60/hour)
+# GPU_CONFIG = "A10G"      # Balanced option (~$1.10/hour)
+# GPU_CONFIG = "A100"      # High performance (~$4.00/hour)
+# GPU_CONFIG = "A100:2"    # Multi-GPU setup (2x A100)
+GPU_CONFIG = "A10G"  # Default: A10G - good balance of performance and cost
 
 # Timeout configuration (in seconds)
 # For image generation, 10 minutes should be sufficient
 TIMEOUT = 600
 
-# Container idle timeout - keep warm for 5 minutes to reduce cold starts
-CONTAINER_IDLE_TIMEOUT = 300
+# Scaledown window - keep warm for 5 minutes to reduce cold starts
+SCALEDOWN_WINDOW = 300
 
 
 @app.function(
     image=image,
     gpu=GPU_CONFIG,
     timeout=TIMEOUT,
-    container_idle_timeout=CONTAINER_IDLE_TIMEOUT,
+    scaledown_window=SCALEDOWN_WINDOW,
     volumes={
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
 )
-@modal.asgi_app()
-def fastapi_app():
+@modal.web_server(8000, startup_timeout=60)
+def web():
     """
-    Main ASGI application that runs ComfyUI server.
+    Main web server that runs ComfyUI.
     This function is called once per container and creates the ComfyUI server.
+    Returns a running aiohttp server.
     """
     import sys
     import asyncio
@@ -169,8 +173,17 @@ def fastapi_app():
     # Start the server setup
     event_loop.run_until_complete(prompt_server.setup())
     
-    # Return the ASGI app
-    return prompt_server.app
+    # For Modal's web_server decorator, we need to start the server ourselves
+    # and return a dict with address info
+    async def start_server():
+        await prompt_server.start("0.0.0.0", 8000, verbose=True)
+    
+    # Start the server in the background
+    event_loop.create_task(start_server())
+    event_loop.create_task(prompt_server.publish_loop())
+    
+    # Return configuration for Modal
+    return {"host": "0.0.0.0", "port": 8000}
 
 
 @app.function(
