@@ -172,7 +172,12 @@ def web():
     event_loop, prompt_server, start_all = main.start_comfyui()
     
     # Run the server - this blocks and keeps the container alive
-    event_loop.run_until_complete(start_all())
+    # The function should NOT return - it runs the server forever
+    try:
+        event_loop.run_until_complete(start_all())
+    except Exception as e:
+        logging.error(f"Server error: {e}")
+        raise
 
 
 @app.function(
