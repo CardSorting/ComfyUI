@@ -53,6 +53,8 @@ image = (
         "torchaudio",
         index_url="https://download.pytorch.org/whl/cu121"
     )
+    # Install aiohttp-to-ASGI adapter
+    .pip_install("asgiref")
     # Install ComfyUI dependencies (headless mode - no frontend packages)
     .pip_install(
         "torchsde",
@@ -123,13 +125,13 @@ SCALEDOWN_WINDOW = 300
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
+    allow_concurrent_inputs=100,  # Allow multiple requests
 )
-@modal.asgi_app()
+@modal.web_server(8000, startup_timeout=120)
 def web():
     """
-    Main web server that runs ComfyUI.
-    This function is called once per container and creates the ComfyUI server.
-    Returns a running aiohttp server.
+    Main web server that runs ComfyUI using aiohttp.
+    Modal's web_server decorator will proxy to this server.
     """
     import sys
     import asyncio
@@ -164,18 +166,13 @@ def web():
     logging.info(f"📁 Outputs directory: /outputs")
     logging.info(f"🎮 GPU: {GPU_CONFIG}")
     
-    # Initialize ComfyUI
-    event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
+    # Initialize and start ComfyUI
+    # This will start the aiohttp server on port 8000
+    # Modal will proxy to it
+    event_loop, prompt_server, start_all = main.start_comfyui()
     
-    loop, prompt_server, start_all = main.start_comfyui(event_loop)
-    
-    # Setup the server
-    event_loop.run_until_complete(prompt_server.setup())
-    
-    # Return the aiohttp Application object
-    # Modal's @asgi_app() decorator will handle starting and running it
-    return prompt_server.app
+    # Run the server - this blocks and keeps the container alive
+    event_loop.run_until_complete(start_all())
 
 
 @app.function(
