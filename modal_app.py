@@ -170,20 +170,15 @@ def web():
     
     loop, prompt_server, start_all = main.start_comfyui(event_loop)
     
-    # Start the server setup
-    event_loop.run_until_complete(prompt_server.setup())
+    # For Modal's web_server decorator, we need to run the server in the event loop
+    # The start_all coroutine will start the server and keep it running
+    try:
+        event_loop.run_until_complete(start_all())
+    except KeyboardInterrupt:
+        logging.info("Server stopped")
     
-    # For Modal's web_server decorator, we need to start the server ourselves
-    # and return a dict with address info
-    async def start_server():
-        await prompt_server.start("0.0.0.0", 8000, verbose=True)
-    
-    # Start the server in the background
-    event_loop.create_task(start_server())
-    event_loop.create_task(prompt_server.publish_loop())
-    
-    # Return configuration for Modal
-    return {"host": "0.0.0.0", "port": 8000}
+    # This line won't be reached during normal operation
+    # The server runs indefinitely in the event loop above
 
 
 @app.function(
