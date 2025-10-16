@@ -19,6 +19,9 @@ Or do it manually:
 Deploy ComfyUI:
   modal deploy modal_app.py
 
+Get your endpoint URL:
+  ./show_endpoint.sh
+
 Update deployment:
   modal deploy modal_app.py
 
@@ -61,11 +64,23 @@ Check deployment status:
 🧪 TESTING
 ═══════════════════════════════════════════════════════════════
 
-Test if API is responding:
-  curl https://YOUR-ENDPOINT/system_stats
+Auto-detect and test (no URL needed!):
+  python modal_test_endpoints.py
 
-Run test script:
-  python modal_test.py https://YOUR-ENDPOINT
+Quick test (bash):
+  ./test_endpoint_simple.sh https://YOUR-ENDPOINT
+
+Full test with specific endpoint:
+  python modal_test_endpoints.py https://YOUR-ENDPOINT
+
+Test with a workflow:
+  python modal_test_endpoints.py https://YOUR-ENDPOINT workflow.json
+
+Find your endpoint URL:
+  ./show_endpoint.sh
+
+Manual test:
+  curl https://YOUR-ENDPOINT/system_stats
 
 ═══════════════════════════════════════════════════════════════
 📁 VOLUMES
