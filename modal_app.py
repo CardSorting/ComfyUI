@@ -124,7 +124,7 @@ SCALEDOWN_WINDOW = 300
         "/outputs": outputs_volume,
     },
 )
-@modal.web_server(8000, startup_timeout=60)
+@modal.asgi_app()
 def web():
     """
     Main web server that runs ComfyUI.
@@ -170,15 +170,12 @@ def web():
     
     loop, prompt_server, start_all = main.start_comfyui(event_loop)
     
-    # For Modal's web_server decorator, we need to run the server in the event loop
-    # The start_all coroutine will start the server and keep it running
-    try:
-        event_loop.run_until_complete(start_all())
-    except KeyboardInterrupt:
-        logging.info("Server stopped")
+    # Setup the server
+    event_loop.run_until_complete(prompt_server.setup())
     
-    # This line won't be reached during normal operation
-    # The server runs indefinitely in the event loop above
+    # Return the aiohttp Application object
+    # Modal's @asgi_app() decorator will handle starting and running it
+    return prompt_server.app
 
 
 @app.function(
