@@ -17,11 +17,17 @@ if ! command -v modal &> /dev/null; then
     exit 1
 fi
 
-# Check if authenticated
-if ! modal token show &> /dev/null 2>&1; then
-    echo "❌ Not authenticated with Modal"
+# Check if authenticated (try a simple command that requires auth)
+if ! modal app list &> /dev/null 2>&1; then
+    echo "❌ Could not connect to Modal"
     echo ""
-    echo "Run: modal setup"
+    echo "This might mean:"
+    echo "  • You're not authenticated (run: modal setup)"
+    echo "  • Modal is having issues"
+    echo ""
+    echo "Try running: modal app list"
+    echo ""
+    echo "If that works, try this script again."
     exit 1
 fi
 
