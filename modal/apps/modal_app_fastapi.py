@@ -89,13 +89,17 @@ def web():
     
     # Configure for headless mode
     args.headless = True
-    args.disable_all_custom_nodes = True
+    args.disable_all_custom_nodes = False  # Enable core nodes
     
     print("🚀 Initializing ComfyUI...")
     
-    # Initialize ComfyUI
+    # Initialize ComfyUI (this loads the nodes)
     event_loop, prompt_server, _ = main.start_comfyui()
     event_loop.run_until_complete(prompt_server.setup())
+    
+    # Check how many nodes were loaded
+    import nodes
+    print(f"📦 Loaded {len(nodes.NODE_CLASS_MAPPINGS)} node types")
     
     print("✅ ComfyUI initialized successfully!")
     
@@ -225,9 +229,34 @@ def web():
     @web_app.get("/object_info")
     async def get_object_info():
         """Get available node information"""
-        # This would need to be implemented
-        # For now, return a placeholder
-        return {"message": "Node information endpoint - to be implemented"}
+        try:
+            import nodes
+            
+            out = {}
+            for node_class_name in nodes.NODE_CLASS_MAPPINGS:
+                try:
+                    node_class = nodes.NODE_CLASS_MAPPINGS[node_class_name]
+                    obj_class = node_class()
+                    
+                    info = {}
+                    info['input'] = node_class.INPUT_TYPES()
+                    info['output'] = node_class.RETURN_TYPES
+                    info['output_is_list'] = node_class.OUTPUT_IS_LIST if hasattr(node_class, 'OUTPUT_IS_LIST') else [False] * len(node_class.RETURN_TYPES)
+                    info['output_name'] = node_class.RETURN_NAMES if hasattr(node_class, 'RETURN_NAMES') else info['output']
+                    info['name'] = node_class_name
+                    info['display_name'] = node_class_name
+                    info['description'] = node_class.DESCRIPTION if hasattr(node_class, 'DESCRIPTION') else ''
+                    info['category'] = node_class.CATEGORY if hasattr(node_class, 'CATEGORY') else 'unknown'
+                    info['output_node'] = node_class.OUTPUT_NODE if hasattr(node_class, 'OUTPUT_NODE') else False
+                    
+                    out[node_class_name] = info
+                except Exception as e:
+                    print(f"Error getting info for node {node_class_name}: {e}")
+                    continue
+            
+            return out
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
     
     return web_app
 
