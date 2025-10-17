@@ -81,9 +81,25 @@ def web():
     os.environ['COMFYUI_MODEL_PATH'] = '/models'
     os.environ['COMFYUI_OUTPUT_PATH'] = '/outputs'
     
-    # Import ComfyUI
-    import main
+    # Import folder_paths FIRST to configure paths before anything else loads
+    import folder_paths
     from comfy.cli_args import args
+    
+    # Configure folder paths to use the Modal volumes BEFORE importing main
+    folder_paths.set_output_directory('/outputs')
+    # Add as default paths (insert at position 0) so they're checked first
+    folder_paths.add_model_folder_path("checkpoints", "/models/checkpoints", is_default=True)
+    folder_paths.add_model_folder_path("vae", "/models/vae", is_default=True)
+    folder_paths.add_model_folder_path("loras", "/models/loras", is_default=True)
+    folder_paths.add_model_folder_path("controlnet", "/models/controlnet", is_default=True)
+    folder_paths.add_model_folder_path("clip_vision", "/models/clip_vision", is_default=True)
+    folder_paths.add_model_folder_path("upscale_models", "/models/upscale_models", is_default=True)
+    folder_paths.add_model_folder_path("embeddings", "/models/embeddings", is_default=True)
+    
+    print(f"📁 Configured model paths: {folder_paths.get_folder_paths('checkpoints')}")
+    
+    # NOW import ComfyUI modules
+    import main
     import execution
     import comfy.model_management
     
@@ -93,13 +109,18 @@ def web():
     
     print("🚀 Initializing ComfyUI...")
     
-    # Initialize ComfyUI (this loads the nodes)
+    # Initialize ComfyUI (this loads nodes and starts execution thread)
     event_loop, prompt_server, _ = main.start_comfyui()
     event_loop.run_until_complete(prompt_server.setup())
     
     # Check how many nodes were loaded
     import nodes
     print(f"📦 Loaded {len(nodes.NODE_CLASS_MAPPINGS)} node types")
+    
+    # Verify the prompt worker thread is running
+    import threading
+    active_threads = [t.name for t in threading.enumerate()]
+    print(f"🔄 Active threads: {active_threads}")
     
     print("✅ ComfyUI initialized successfully!")
     
@@ -137,24 +158,32 @@ def web():
         try:
             prompt_id = str(uuid.uuid4())
             
-            # Validate workflow
-            valid = execution.validate_prompt(request.prompt)
+            # Validate workflow (needs prompt_id, prompt dict, and partial_execution_list)
+            valid = await execution.validate_prompt(prompt_id, request.prompt, None)
             if not valid[0]:
                 return {
                     "error": f"Invalid workflow: {valid[1]}",
-                    "valid": False
+                    "valid": False,
+                    "node_errors": valid[3] if len(valid) > 3 else {}
                 }
             
-            # Queue the workflow
+            # Extract the outputs to execute from validation result
+            outputs_to_execute = valid[2]  # This is critical!
+            extra_data = {}
+            if request.client_id:
+                extra_data["client_id"] = request.client_id
+            
+            # Queue the workflow with proper outputs
             number = prompt_server.number
             prompt_server.number += 1
             
-            prompt_server.prompt_queue.put((number, prompt_id, request.prompt, {}, []))
+            prompt_server.prompt_queue.put((number, prompt_id, request.prompt, extra_data, outputs_to_execute))
             
             return {
                 "prompt_id": prompt_id,
                 "number": number,
-                "valid": True
+                "valid": True,
+                "node_errors": valid[3] if len(valid) > 3 else {}
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -223,6 +252,81 @@ def web():
         try:
             comfy.model_management.interrupt_current_processing()
             return {"status": "interrupted"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.get("/debug/folder_paths")
+    async def debug_folder_paths():
+        """Debug endpoint to see what folders ComfyUI knows about"""
+        try:
+            import os
+            debug_info = {}
+            
+            # Get configured paths
+            for folder_type in ["checkpoints", "vae", "loras", "controlnet"]:
+                paths = folder_paths.get_folder_paths(folder_type)
+                debug_info[folder_type] = {
+                    "configured_paths": paths,
+                    "files": []
+                }
+                
+                # Check what files exist in each path
+                for path in paths:
+                    if os.path.exists(path):
+                        try:
+                            files = os.listdir(path)
+                            debug_info[folder_type]["files"].extend([
+                                f"{path}/{f}" for f in files if os.path.isfile(os.path.join(path, f))
+                            ])
+                        except Exception as e:
+                            debug_info[folder_type]["error"] = str(e)
+                    else:
+                        debug_info[folder_type]["path_exists"] = False
+            
+            # Get actual available models from folder_paths
+            debug_info["available_checkpoints"] = folder_paths.get_filename_list("checkpoints")
+            
+            return debug_info
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.get("/outputs")
+    async def list_outputs():
+        """List all output files"""
+        try:
+            import os
+            outputs = []
+            output_dir = "/outputs"
+            
+            if os.path.exists(output_dir):
+                for filename in os.listdir(output_dir):
+                    filepath = os.path.join(output_dir, filename)
+                    if os.path.isfile(filepath):
+                        stat = os.stat(filepath)
+                        outputs.append({
+                            "filename": filename,
+                            "size": stat.st_size,
+                            "modified": stat.st_mtime
+                        })
+            
+            return {"outputs": sorted(outputs, key=lambda x: x['modified'], reverse=True)}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.get("/outputs/{filename}")
+    async def get_output_file(filename: str):
+        """Download a specific output file"""
+        try:
+            from fastapi.responses import FileResponse
+            import os
+            
+            filepath = os.path.join("/outputs", filename)
+            if not os.path.exists(filepath):
+                raise HTTPException(status_code=404, detail="File not found")
+            
+            return FileResponse(filepath, media_type="image/png", filename=filename)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
