@@ -369,13 +369,14 @@ def web():
     image=image,
     volumes={"/models": models_volume},
     timeout=7200,  # 2 hours for large models
+    secrets=[modal.Secret.from_name("civitai-api-key", required=False)],
 )
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """
     Download a single model from URL to the persistent volume
     
     Args:
-        url: Direct download URL for the model
+        url: Direct download URL for the model (supports Civitai, HuggingFace, etc.)
         category: Model category (checkpoints, vae, loras, controlnet, clip_vision, etc.)
         filename: Optional filename (auto-detected from URL if not provided)
     """
@@ -409,6 +410,18 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
     # Download with progress
     print(f"🌐 Downloading: {filename}")
     print(f"   From: {url[:80]}...")
+    
+    # Check if this is a Civitai URL and add authentication if available
+    is_civitai = 'civitai.com' in url.lower()
+    civitai_api_key = os.environ.get('CIVITAI_API_KEY')
+    
+    if is_civitai and civitai_api_key:
+        print(f"   🔑 Using Civitai API authentication")
+        # Add API key to URL
+        separator = '&' if '?' in url else '?'
+        url = f"{url}{separator}token={civitai_api_key}"
+    elif is_civitai and not civitai_api_key:
+        print(f"   ⚠️  Civitai URL detected but no API key found. Download may fail for private models.")
     
     def progress_hook(block_num, block_size, total_size):
         if total_size > 0:
