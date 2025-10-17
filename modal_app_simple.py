@@ -53,7 +53,6 @@ SCALEDOWN_WINDOW = 300
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
-    allow_concurrent_inputs=100,
 )
 @modal.web_server(8000, startup_timeout=120)
 def web():
@@ -72,12 +71,14 @@ def web():
     
     # Start ComfyUI as a subprocess
     # This way Modal just proxies to it, no ASGI conversion needed
+    # Add --disable-cuda-malloc to avoid CUDA allocator issues with Modal
     cmd = [
         "python", "/app/main.py",
         "--headless",
         "--listen", "0.0.0.0",
         "--port", "8000",
         "--disable-all-custom-nodes",
+        "--disable-cuda-malloc",  # Prevent CUDA allocator config issues
     ]
     
     print("🚀 Starting ComfyUI server...")
