@@ -1,4 +1,10 @@
 #!/bin/bash
+# Deprecated: Use ./modal_deploy.sh instead
+echo "⚠️  This script is deprecated. Please use ./modal_deploy.sh instead"
+echo "Redirecting to new script..."
+echo
+./modal_deploy.sh
+exit $?
 
 # ComfyUI Modal Deployment Script
 # This script helps you deploy ComfyUI to Modal.com

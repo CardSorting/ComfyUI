@@ -235,44 +235,144 @@ def web():
 @app.function(
     image=image,
     volumes={"/models": models_volume},
-    timeout=3600,
+    timeout=7200,  # 2 hours for large models
 )
-def download_models():
-    """Download models from URLs to the persistent volume"""
+def download_model(url: str, category: str = "checkpoints", filename: str = None):
+    """
+    Download a single model from URL to the persistent volume
+    
+    Args:
+        url: Direct download URL for the model
+        category: Model category (checkpoints, vae, loras, controlnet, clip_vision, etc.)
+        filename: Optional filename (auto-detected from URL if not provided)
+    """
     import urllib.request
     import os
+    from urllib.parse import urlparse, unquote
     
-    print("📥 Downloading models to persistent volume...")
+    print(f"📥 Downloading model to /models/{category}/")
     
-    # Create model directories
-    model_dirs = [
-        "/models/checkpoints",
-        "/models/vae",
-        "/models/loras",
-        "/models/controlnet",
+    # Create model directory
+    model_dir = f"/models/{category}"
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # Determine filename
+    if not filename:
+        # Try to extract filename from URL
+        parsed = urlparse(url)
+        filename = unquote(os.path.basename(parsed.path))
+        if not filename or filename == '':
+            filename = "downloaded_model"
+    
+    file_path = os.path.join(model_dir, filename)
+    
+    # Check if already exists
+    if os.path.exists(file_path):
+        file_size = os.path.getsize(file_path)
+        print(f"⚠️  File already exists: {filename} ({file_size / 1024 / 1024:.1f} MB)")
+        print(f"   Skipping download. Delete it first if you want to re-download.")
+        return {"status": "skipped", "path": file_path, "size": file_size}
+    
+    # Download with progress
+    print(f"🌐 Downloading: {filename}")
+    print(f"   From: {url[:80]}...")
+    
+    def progress_hook(block_num, block_size, total_size):
+        if total_size > 0:
+            downloaded = block_num * block_size
+            percent = min(downloaded * 100 / total_size, 100)
+            mb_downloaded = downloaded / 1024 / 1024
+            mb_total = total_size / 1024 / 1024
+            print(f"   Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='\r')
+    
+    try:
+        urllib.request.urlretrieve(url, file_path, reporthook=progress_hook)
+        print()  # New line after progress
+        
+        file_size = os.path.getsize(file_path)
+        print(f"✅ Downloaded: {filename} ({file_size / 1024 / 1024:.1f} MB)")
+        
+        # Commit volume changes
+        models_volume.commit()
+        print("💾 Volume committed!")
+        
+        return {
+            "status": "success",
+            "path": file_path,
+            "filename": filename,
+            "size": file_size,
+            "category": category
+        }
+    except Exception as e:
+        print(f"❌ Error downloading: {e}")
+        # Clean up partial download
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise
+
+
+@app.function(
+    image=image,
+    volumes={"/models": models_volume},
+    timeout=300,
+)
+def list_models():
+    """List all models in the persistent volume"""
+    import os
+    
+    categories = [
+        "checkpoints", "vae", "loras", "controlnet", 
+        "clip_vision", "unet", "embeddings", "upscale_models"
     ]
     
-    for dir_path in model_dirs:
-        os.makedirs(dir_path, exist_ok=True)
-        print(f"✅ Created directory: {dir_path}")
+    print("📦 Models in persistent volume:")
+    print("=" * 70)
     
-    # Add your model download URLs here
-    models = [
-        # Example:
-        # {
-        #     "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
-        #     "path": "/models/checkpoints/sd_xl_base_1.0.safetensors"
-        # },
-    ]
+    total_size = 0
+    total_files = 0
     
-    for model in models:
-        if not os.path.exists(model["path"]):
-            print(f"📥 Downloading {os.path.basename(model['path'])}...")
-            urllib.request.urlretrieve(model["url"], model["path"])
-            print(f"✅ Downloaded!")
+    for category in categories:
+        cat_path = f"/models/{category}"
+        if os.path.exists(cat_path):
+            files = os.listdir(cat_path)
+            if files:
+                print(f"\n📁 {category}:")
+                for file in sorted(files):
+                    file_path = os.path.join(cat_path, file)
+                    if os.path.isfile(file_path):
+                        size = os.path.getsize(file_path)
+                        total_size += size
+                        total_files += 1
+                        print(f"   • {file} ({size / 1024 / 1024:.1f} MB)")
     
+    print("\n" + "=" * 70)
+    print(f"Total: {total_files} files, {total_size / 1024 / 1024 / 1024:.2f} GB")
+    
+    return {"total_files": total_files, "total_size_gb": total_size / 1024 / 1024 / 1024}
+
+
+@app.function(
+    image=image,
+    volumes={"/models": models_volume},
+    timeout=300,
+)
+def delete_model(category: str, filename: str):
+    """Delete a model from the persistent volume"""
+    import os
+    
+    file_path = f"/models/{category}/{filename}"
+    
+    if not os.path.exists(file_path):
+        print(f"❌ File not found: {file_path}")
+        return {"status": "not_found"}
+    
+    size = os.path.getsize(file_path)
+    os.remove(file_path)
     models_volume.commit()
-    print("✅ Setup complete!")
+    
+    print(f"🗑️  Deleted: {filename} ({size / 1024 / 1024:.1f} MB)")
+    
+    return {"status": "deleted", "filename": filename, "size": size}
 
 
 @app.local_entrypoint()
