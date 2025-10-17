@@ -159,10 +159,11 @@ def web():
     async def get_queue():
         """Get current queue status"""
         try:
-            queue_info = prompt_server.prompt_queue.get_queue()
+            # Use the correct method from ComfyUI's PromptQueue
+            current_queue = prompt_server.prompt_queue.get_current_queue_volatile()
             return {
-                "queue_running": queue_info[0],
-                "queue_pending": queue_info[1]
+                "queue_running": current_queue[0],
+                "queue_pending": current_queue[1]
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -191,7 +192,10 @@ def web():
         try:
             device = comfy.model_management.get_torch_device()
             device_name = comfy.model_management.get_torch_device_name(device)
-            vram_total, vram_free = comfy.model_management.get_free_memory(device)
+            
+            # Get memory info - these functions return single int by default
+            vram_free = comfy.model_management.get_free_memory(device)
+            vram_total = comfy.model_management.get_total_memory(device)
             
             return {
                 "system": {
