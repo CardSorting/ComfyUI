@@ -15,16 +15,30 @@ if modal secret list 2>/dev/null | grep -q "civitai-api-key"; then
 else
     echo "   ⚠️  Secret 'civitai-api-key' not found."
     echo ""
-    echo "   To create it, visit: https://civitai.com/user/account"
-    echo "   Then run:"
-    echo "   modal secret create civitai-api-key CIVITAI_API_KEY=YOUR_KEY_HERE"
+    echo "   You need a Civitai API key to download models."
     echo ""
-    read -p "   Have you created the secret? (y/n): " -n 1 -r
+    echo "   1. Visit: https://civitai.com/user/account"
+    echo "   2. Scroll to 'API Keys' section"
+    echo "   3. Click 'Add API Key' and copy it"
+    echo ""
+    read -p "   Do you have your API key ready? (y/n): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "   Please create the secret first, then run this script again."
+        echo "   Please get your API key first, then run this script again."
         exit 1
     fi
+    echo ""
+    echo "   Please enter your Civitai API key:"
+    read -r CIVITAI_KEY
+    
+    if [ -z "$CIVITAI_KEY" ]; then
+        echo "   ❌ No API key provided. Exiting."
+        exit 1
+    fi
+    
+    echo "   Creating Modal secret..."
+    modal secret create civitai-api-key CIVITAI_API_KEY="$CIVITAI_KEY"
+    echo "   ✅ Secret created!"
 fi
 
 echo ""

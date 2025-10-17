@@ -35,7 +35,7 @@ image = (
         "python-dotenv>=1.0.0", "alembic", "SQLAlchemy",
         "av>=14.2.0", "kornia>=0.7.1", "spandrel",
         "soundfile", "pydantic~=2.0", "pydantic-settings~=2.0",
-        "fastapi[standard]",
+        "fastapi[standard]", "requests",
     )
     # Add local files LAST - this must be the final step
     .add_local_dir(".", remote_path="/app")
@@ -369,7 +369,7 @@ def web():
     image=image,
     volumes={"/models": models_volume},
     timeout=7200,  # 2 hours for large models
-    secrets=[modal.Secret.from_name("civitai-api-key", required=False)],
+    secrets=[modal.Secret.from_name("civitai-api-key")],
 )
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """
@@ -423,38 +423,74 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
     elif is_civitai and not civitai_api_key:
         print(f"   ⚠️  Civitai URL detected but no API key found. Download may fail for private models.")
     
-    def progress_hook(block_num, block_size, total_size):
-        if total_size > 0:
-            downloaded = block_num * block_size
-            percent = min(downloaded * 100 / total_size, 100)
-            mb_downloaded = downloaded / 1024 / 1024
-            mb_total = total_size / 1024 / 1024
-            print(f"   Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='\r')
+    # Download with retry logic for large files
+    max_retries = 3
+    retry_count = 0
     
-    try:
-        urllib.request.urlretrieve(url, file_path, reporthook=progress_hook)
-        print()  # New line after progress
-        
-        file_size = os.path.getsize(file_path)
-        print(f"✅ Downloaded: {filename} ({file_size / 1024 / 1024:.1f} MB)")
-        
-        # Commit volume changes
-        models_volume.commit()
-        print("💾 Volume committed!")
-        
-        return {
-            "status": "success",
-            "path": file_path,
-            "filename": filename,
-            "size": file_size,
-            "category": category
-        }
-    except Exception as e:
-        print(f"❌ Error downloading: {e}")
-        # Clean up partial download
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise
+    while retry_count < max_retries:
+        try:
+            # Use requests for better handling of large files
+            import requests
+            
+            print(f"   Attempt {retry_count + 1}/{max_retries}")
+            response = requests.get(url, stream=True, timeout=300)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(file_path, 'wb') as f:
+                downloaded = 0
+                chunk_size = 8192 * 16  # 128KB chunks
+                
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if total_size > 0:
+                            percent = downloaded * 100 / total_size
+                            mb_downloaded = downloaded / 1024 / 1024
+                            mb_total = total_size / 1024 / 1024
+                            print(f"   Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='\r')
+            
+            print()  # New line after progress
+            
+            file_size = os.path.getsize(file_path)
+            
+            # Verify file size if we know the expected size
+            if total_size > 0 and file_size < total_size:
+                raise Exception(f"Download incomplete: {file_size}/{total_size} bytes")
+            
+            print(f"✅ Downloaded: {filename} ({file_size / 1024 / 1024:.1f} MB)")
+            
+            # Commit volume changes
+            models_volume.commit()
+            print("💾 Volume committed!")
+            
+            return {
+                "status": "success",
+                "path": file_path,
+                "filename": filename,
+                "size": file_size,
+                "category": category
+            }
+            
+        except Exception as e:
+            retry_count += 1
+            print(f"\n❌ Error on attempt {retry_count}: {e}")
+            
+            if retry_count < max_retries:
+                import time
+                wait_time = retry_count * 5  # Progressive backoff: 5s, 10s
+                print(f"   Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                # Don't delete the file yet, we might be able to resume
+            else:
+                print(f"❌ Failed after {max_retries} attempts")
+                # Clean up partial download
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                raise
 
 
 @app.function(
