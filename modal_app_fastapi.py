@@ -67,7 +67,8 @@ SCALEDOWN_WINDOW = 300
 class ComfyUIService:
     """ComfyUI service that initializes once and handles multiple requests"""
     
-    def __enter__(self):
+    @modal.enter()
+    def initialize(self):
         """Initialize ComfyUI when container starts"""
         import sys
         import asyncio
@@ -98,7 +99,6 @@ class ComfyUIService:
         self.event_loop.run_until_complete(self.prompt_server.setup())
         
         print("✅ ComfyUI initialized successfully!")
-        return self
     
     @modal.method()
     def queue_prompt(self, workflow: dict, client_id: str = None):
@@ -149,6 +149,9 @@ class ComfyUIService:
     @modal.method()
     def get_system_stats(self):
         """Get system statistics"""
+        import sys
+        sys.path.insert(0, "/app")
+        
         import comfy.model_management
         
         device = comfy.model_management.get_torch_device()
@@ -172,6 +175,9 @@ class ComfyUIService:
     @modal.method()
     def interrupt(self):
         """Interrupt current execution"""
+        import sys
+        sys.path.insert(0, "/app")
+        
         import comfy.model_management
         comfy.model_management.interrupt_current_processing()
         return {"status": "interrupted"}
