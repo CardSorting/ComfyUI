@@ -56,7 +56,7 @@ SCALEDOWN_WINDOW = 300
     image=image,
     gpu=GPU_CONFIG,
     timeout=TIMEOUT,
-    container_idle_timeout=SCALEDOWN_WINDOW,
+    scaledown_window=SCALEDOWN_WINDOW,
     volumes={
         "/models": models_volume,
         "/outputs": outputs_volume,
