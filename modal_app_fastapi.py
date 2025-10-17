@@ -27,7 +27,6 @@ image = (
         index_url="https://download.pytorch.org/whl/cu121"
     )
     .pip_install(
-        "fastapi[standard]",  # FastAPI with all extras
         "torchsde", "numpy>=1.25.0", "einops",
         "transformers>=4.37.2", "tokenizers>=0.13.3",
         "sentencepiece", "safetensors>=0.4.2",
@@ -36,7 +35,9 @@ image = (
         "python-dotenv>=1.0.0", "alembic", "SQLAlchemy",
         "av>=14.2.0", "kornia>=0.7.1", "spandrel",
         "soundfile", "pydantic~=2.0", "pydantic-settings~=2.0",
+        "fastapi[standard]",  # FastAPI with all extras
     )
+    # Add local files LAST (or use copy=True)
     .add_local_dir(".", remote_path="/app")
 )
 
