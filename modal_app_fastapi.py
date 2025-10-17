@@ -35,12 +35,14 @@ image = (
         "python-dotenv>=1.0.0", "alembic", "SQLAlchemy",
         "av>=14.2.0", "kornia>=0.7.1", "spandrel",
         "soundfile", "pydantic~=2.0", "pydantic-settings~=2.0",
-        "fastapi[standard]",  # FastAPI with all extras
+        "fastapi[standard]",
     )
-    # Add local files LAST (or use copy=True)
+    # Add local files LAST - this must be the final step
     .add_local_dir(".", remote_path="/app")
 )
 
+# Use the same image for both services
+fastapi_image = image
 # Persistent volumes
 models_volume = modal.Volume.from_name("comfyui-models", create_if_missing=True)
 outputs_volume = modal.Volume.from_name("comfyui-outputs", create_if_missing=True)
@@ -176,7 +178,7 @@ class ComfyUIService:
 
 
 # Create FastAPI app with endpoints
-@app.function(image=image.pip_install("fastapi[standard]"))
+@app.function(image=fastapi_image)
 @modal.asgi_app()
 def fastapi_app():
     """FastAPI wrapper for ComfyUI"""
