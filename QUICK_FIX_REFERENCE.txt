@@ -1,0 +1,102 @@
+═══════════════════════════════════════════════════════════════════════════════
+  CUSTOM NODES SERVERLESS FIX - QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLEM FIXED:
+  ❌ ModuleNotFoundError: No module named 'cv2'
+  ❌ Cannot import /app/custom_nodes/comfyui-impact-pack
+
+SOLUTION:
+  ✅ Disabled problematic custom nodes in serverless environments
+  ✅ Whitelisted only compatible custom nodes
+
+═══════════════════════════════════════════════════════════════════════════════
+FILES MODIFIED:
+═══════════════════════════════════════════════════════════════════════════════
+
+1. modal/apps/modal_app_fastapi.py
+   - Set: args.disable_all_custom_nodes = True
+   - Added: args.whitelist_custom_nodes = ["websocket_image_save.py"]
+
+2. Dockerfile.headless
+   - Added: --disable-all-custom-nodes --whitelist-custom-nodes websocket_image_save.py
+
+3. start_comfyui_headless.sh
+   - Added: --disable-all-custom-nodes \
+            --whitelist-custom-nodes websocket_image_save.py
+
+═══════════════════════════════════════════════════════════════════════════════
+NEW FILES CREATED:
+═══════════════════════════════════════════════════════════════════════════════
+
+1. CUSTOM_NODES_SERVERLESS_FIX.md
+   - Full documentation with alternative solutions
+
+2. SERVERLESS_CUSTOM_NODES_FIX_SUMMARY.md
+   - Complete technical summary of all changes
+
+3. test_serverless_startup.py
+   - Automated test script to verify the fix
+
+4. QUICK_FIX_REFERENCE.txt (this file)
+   - Quick reference for developers
+
+═══════════════════════════════════════════════════════════════════════════════
+VERIFICATION:
+═══════════════════════════════════════════════════════════════════════════════
+
+Test the fix:
+  $ python test_serverless_startup.py
+
+Or manually:
+  $ python main.py --headless --disable-all-custom-nodes \
+    --whitelist-custom-nodes websocket_image_save.py
+
+Expected result:
+  ✅ No CV2 errors
+  ✅ No Impact Pack import failures
+  ✅ Server starts successfully
+
+═══════════════════════════════════════════════════════════════════════════════
+IF YOU NEED CUSTOM NODES:
+═══════════════════════════════════════════════════════════════════════════════
+
+Option 1 - Install Dependencies:
+  Add to requirements-headless.txt:
+    opencv-python
+    
+  Then remove --disable-all-custom-nodes flag
+
+Option 2 - Whitelist Specific Nodes:
+  --whitelist-custom-nodes node1.py node2.py node3.py
+
+Option 3 - Disable Specific Nodes Only:
+  $ mv custom_nodes/comfyui-impact-pack custom_nodes/comfyui-impact-pack.disabled
+
+═══════════════════════════════════════════════════════════════════════════════
+DEPLOYMENT COMMANDS:
+═══════════════════════════════════════════════════════════════════════════════
+
+Modal:
+  $ modal deploy modal/apps/modal_app_fastapi.py
+
+Docker:
+  $ docker build -f Dockerfile.headless -t comfyui-headless .
+  $ docker run -p 8188:8188 comfyui-headless
+
+Shell Script:
+  $ ./start_comfyui_headless.sh start
+
+═══════════════════════════════════════════════════════════════════════════════
+DOCUMENTATION:
+═══════════════════════════════════════════════════════════════════════════════
+
+Read these for more details:
+  • CUSTOM_NODES_SERVERLESS_FIX.md - User-friendly guide
+  • SERVERLESS_CUSTOM_NODES_FIX_SUMMARY.md - Technical details
+  • README-HEADLESS.md - General headless documentation
+
+═══════════════════════════════════════════════════════════════════════════════
+STATUS: ✅ ISSUE RESOLVED
+═══════════════════════════════════════════════════════════════════════════════
+

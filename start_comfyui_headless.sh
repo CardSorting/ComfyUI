@@ -159,6 +159,7 @@ start_comfyui() {
     export PYTHONUNBUFFERED=1
     
     # Start ComfyUI with optimal configuration
+    # Disable problematic custom nodes (e.g. impact-pack requires cv2)
     nohup python3 main.py \
         --headless \
         --listen "$COMFYUI_HOST" \
@@ -166,6 +167,8 @@ start_comfyui() {
         --cuda-device 0 \
         $GPU_FLAGS \
         --disable-cuda-malloc \
+        --disable-all-custom-nodes \
+        --whitelist-custom-nodes websocket_image_save.py \
         --verbose INFO \
         > "$LOG_FILE" 2>&1 &
     

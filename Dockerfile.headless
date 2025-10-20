@@ -41,4 +41,5 @@ RUN mkdir -p models input output temp
 EXPOSE 8188
 
 # Set default command for headless mode
-CMD ["python", "main.py", "--headless", "--listen", "0.0.0.0", "--port", "8188"]
+# Disable custom nodes that require dependencies not available in serverless (e.g. cv2)
+CMD ["python", "main.py", "--headless", "--listen", "0.0.0.0", "--port", "8188", "--disable-all-custom-nodes", "--whitelist-custom-nodes", "websocket_image_save.py"]

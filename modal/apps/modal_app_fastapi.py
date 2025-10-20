@@ -36,6 +36,7 @@ image = (
         "av>=14.2.0", "kornia>=0.7.1", "spandrel",
         "soundfile", "pydantic~=2.0", "pydantic-settings~=2.0",
         "fastapi[standard]", "requests",
+        "boto3", "botocore",  # For Backblaze B2 S3-compatible uploads
     )
     # Add local files LAST - this must be the final step
     .add_local_dir(".", remote_path="/app")
@@ -61,17 +62,21 @@ SCALEDOWN_WINDOW = 300
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
+    secrets=[modal.Secret.from_name("backblaze-b2-credentials")],
 )
 @modal.asgi_app()
 def web():
     """FastAPI app that runs inside the GPU container with ComfyUI"""
     import sys
     sys.path.insert(0, "/app")
+    sys.path.insert(0, "/app/modal/apps")
     
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
     import uuid
+    import json
+    import time
     
     # Set environment variables
     os.environ['COMFYUI_HEADLESS'] = '1'
@@ -105,7 +110,10 @@ def web():
     
     # Configure for headless mode
     args.headless = True
-    args.disable_all_custom_nodes = False  # Enable core nodes
+    # Disable problematic custom nodes that require dependencies not available in serverless
+    # (comfyui-impact-pack and comfyui-impact-subpack require cv2/OpenCV)
+    args.disable_all_custom_nodes = True
+    args.whitelist_custom_nodes = ["websocket_image_save.py"]  # Only allow core custom nodes
     
     print("🚀 Initializing ComfyUI...")
     
@@ -124,6 +132,16 @@ def web():
     
     print("✅ ComfyUI initialized successfully!")
     
+    # Initialize Backblaze B2 storage
+    from b2_storage import BackblazeB2Storage
+    b2_storage = BackblazeB2Storage()
+    
+    if b2_storage.is_enabled():
+        storage_info = b2_storage.get_storage_info()
+        print(f"☁️  Backblaze B2 enabled: {storage_info['bucket']}")
+    else:
+        print("⚠️  Backblaze B2 storage is disabled - files will be served from Modal")
+    
     # Create FastAPI app
     web_app = FastAPI(
         title="ComfyUI API on Modal",
@@ -134,27 +152,169 @@ def web():
     class PromptRequest(BaseModel):
         prompt: dict
         client_id: str | None = None
+        upload_to_b2: bool = True  # Auto-upload to B2 by default
+        wait_for_completion: bool = False  # Set to True for synchronous execution
+    
+    def wait_for_execution(prompt_id: str, timeout: int = 600) -> dict:
+        """
+        Wait for a workflow execution to complete and return results
+        
+        Args:
+            prompt_id: The prompt ID to wait for
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            Dict with execution status and output files
+        """
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            # Check history for this prompt
+            history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
+            
+            if prompt_id in history:
+                execution_data = history[prompt_id]
+                
+                # Check if execution is complete
+                if 'outputs' in execution_data:
+                    return {
+                        "status": "completed",
+                        "prompt_id": prompt_id,
+                        "outputs": execution_data['outputs'],
+                        "execution_time": time.time() - start_time
+                    }
+                elif 'status' in execution_data and execution_data['status'].get('status_str') == 'error':
+                    return {
+                        "status": "error",
+                        "prompt_id": prompt_id,
+                        "error": execution_data['status'].get('messages', []),
+                        "execution_time": time.time() - start_time
+                    }
+            
+            # Check queue status
+            current_queue = prompt_server.prompt_queue.get_current_queue_volatile()
+            queue_running = current_queue[0]
+            queue_pending = current_queue[1]
+            
+            # Check if still in queue
+            still_queued = any(
+                item[1] == prompt_id 
+                for item in queue_running + queue_pending
+            )
+            
+            if not still_queued:
+                # Not in queue but not in history - might have failed
+                time.sleep(0.5)
+                continue
+            
+            # Still processing, wait a bit
+            time.sleep(1)
+        
+        return {
+            "status": "timeout",
+            "prompt_id": prompt_id,
+            "message": f"Execution did not complete within {timeout} seconds"
+        }
+    
+    def upload_outputs_to_b2(prompt_id: str, outputs: dict) -> dict:
+        """
+        Upload output files to Backblaze B2
+        
+        Args:
+            prompt_id: The prompt ID
+            outputs: Output data from ComfyUI execution
+            
+        Returns:
+            Dict mapping node IDs to B2 upload results
+        """
+        if not b2_storage.is_enabled():
+            return {"error": "B2 storage is not enabled"}
+        
+        import os
+        upload_results = {}
+        
+        for node_id, node_output in outputs.items():
+            if 'images' in node_output:
+                images = node_output['images']
+                uploaded_images = []
+                
+                for img_data in images:
+                    filename = img_data.get('filename')
+                    subfolder = img_data.get('subfolder', '')
+                    
+                    if filename:
+                        # Construct the full file path
+                        if subfolder:
+                            file_path = os.path.join('/outputs', subfolder, filename)
+                        else:
+                            file_path = os.path.join('/outputs', filename)
+                        
+                        if os.path.exists(file_path):
+                            # Upload to B2
+                            metadata = {
+                                'prompt_id': prompt_id,
+                                'node_id': node_id,
+                                'type': img_data.get('type', 'output')
+                            }
+                            
+                            upload_result = b2_storage.upload_file(
+                                file_path=file_path,
+                                object_name=filename,
+                                folder='generations',
+                                metadata=metadata
+                            )
+                            
+                            if upload_result:
+                                uploaded_images.append({
+                                    "filename": filename,
+                                    "url": upload_result['url'],
+                                    "size": upload_result['size'],
+                                    "b2_key": upload_result['key']
+                                })
+                            else:
+                                uploaded_images.append({
+                                    "filename": filename,
+                                    "error": "Upload failed"
+                                })
+                
+                if uploaded_images:
+                    upload_results[node_id] = {
+                        "type": "images",
+                        "uploads": uploaded_images
+                    }
+        
+        return upload_results
     
     @web_app.get("/")
     async def root():
         """API information"""
+        b2_info = b2_storage.get_storage_info() if b2_storage else {"enabled": False}
+        
         return {
-            "name": "ComfyUI on Modal",
+            "name": "ComfyUI on Modal with Backblaze B2",
             "version": "1.0.0",
             "status": "running",
+            "backblaze_b2": b2_info,
             "endpoints": {
-                "POST /prompt": "Queue a workflow",
+                "POST /prompt": "Queue a workflow (set wait_for_completion=true for sync + B2 upload)",
+                "POST /execute_and_upload": "Execute workflow and auto-upload to B2 (simplified)",
                 "GET /queue": "Get queue status",
                 "GET /history": "Get execution history",
                 "GET /history/{prompt_id}": "Get specific execution",
+                "POST /history/{prompt_id}/upload_to_b2": "Upload existing outputs to B2",
                 "GET /system_stats": "Get system information",
+                "GET /b2/status": "Get B2 storage status",
                 "POST /interrupt": "Interrupt execution",
             }
         }
     
     @web_app.post("/prompt")
     async def queue_prompt(request: PromptRequest):
-        """Queue a ComfyUI workflow for execution"""
+        """
+        Queue a ComfyUI workflow for execution
+        
+        Set wait_for_completion=True for synchronous execution with B2 upload
+        """
         try:
             prompt_id = str(uuid.uuid4())
             
@@ -179,11 +339,35 @@ def web():
             
             prompt_server.prompt_queue.put((number, prompt_id, request.prompt, extra_data, outputs_to_execute))
             
+            # If synchronous execution is requested, wait for completion
+            if request.wait_for_completion:
+                execution_result = wait_for_execution(prompt_id, timeout=TIMEOUT)
+                
+                # If B2 upload is enabled and execution completed successfully
+                if (request.upload_to_b2 and 
+                    b2_storage.is_enabled() and 
+                    execution_result.get('status') == 'completed' and 
+                    'outputs' in execution_result):
+                    
+                    # Upload outputs to B2
+                    b2_uploads = upload_outputs_to_b2(prompt_id, execution_result['outputs'])
+                    execution_result['b2_uploads'] = b2_uploads
+                
+                return {
+                    "prompt_id": prompt_id,
+                    "number": number,
+                    "valid": True,
+                    "node_errors": valid[3] if len(valid) > 3 else {},
+                    "execution": execution_result
+                }
+            
+            # Asynchronous mode - just return queue info
             return {
                 "prompt_id": prompt_id,
                 "number": number,
                 "valid": True,
-                "node_errors": valid[3] if len(valid) > 3 else {}
+                "node_errors": valid[3] if len(valid) > 3 else {},
+                "message": "Workflow queued. Use GET /history/{prompt_id} to check status."
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -216,6 +400,47 @@ def web():
         try:
             history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
             return history
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.post("/history/{prompt_id}/upload_to_b2")
+    async def upload_history_to_b2(prompt_id: str):
+        """Upload outputs from a completed execution to Backblaze B2"""
+        try:
+            if not b2_storage.is_enabled():
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Backblaze B2 storage is not enabled"
+                )
+            
+            # Get execution history
+            history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
+            
+            if prompt_id not in history:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No execution found for prompt_id: {prompt_id}"
+                )
+            
+            execution_data = history[prompt_id]
+            
+            if 'outputs' not in execution_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Execution has no outputs to upload"
+                )
+            
+            # Upload to B2
+            b2_uploads = upload_outputs_to_b2(prompt_id, execution_data['outputs'])
+            
+            return {
+                "prompt_id": prompt_id,
+                "status": "success",
+                "b2_uploads": b2_uploads
+            }
+            
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -252,6 +477,68 @@ def web():
         try:
             comfy.model_management.interrupt_current_processing()
             return {"status": "interrupted"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.get("/b2/status")
+    async def get_b2_status():
+        """Get Backblaze B2 storage status and configuration"""
+        try:
+            if not b2_storage.is_enabled():
+                return {
+                    "enabled": False,
+                    "message": "Backblaze B2 storage is not configured"
+                }
+            
+            storage_info = b2_storage.get_storage_info()
+            
+            # Try to list recent files
+            recent_files = []
+            try:
+                files = b2_storage.list_files(prefix="generations/")
+                # Get last 10 files
+                recent_files = sorted(
+                    files, 
+                    key=lambda x: x.get('LastModified', ''), 
+                    reverse=True
+                )[:10]
+                recent_files = [
+                    {
+                        "key": f.get('Key'),
+                        "size": f.get('Size'),
+                        "last_modified": f.get('LastModified')
+                    }
+                    for f in recent_files
+                ]
+            except Exception as e:
+                recent_files = {"error": str(e)}
+            
+            return {
+                "enabled": True,
+                "storage_info": storage_info,
+                "recent_uploads": recent_files
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.post("/execute_and_upload")
+    async def execute_and_upload(request: PromptRequest):
+        """
+        Simplified endpoint: Execute workflow and automatically upload to B2
+        
+        This is a convenience endpoint that always waits for completion
+        and uploads to B2 if enabled. Perfect for backend integration.
+        """
+        try:
+            # Force synchronous execution with B2 upload
+            request.wait_for_completion = True
+            request.upload_to_b2 = True
+            
+            # Use the main prompt endpoint logic
+            result = await queue_prompt(request)
+            
+            return result
+            
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
