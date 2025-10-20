@@ -38,8 +38,8 @@ image = (
         "fastapi[standard]", "requests",
         "boto3", "botocore",  # For Backblaze B2 S3-compatible uploads
     )
-    # Add local files LAST - this must be the final step
-    .add_local_dir(".", remote_path="/app")
+    # Add ComfyUI root directory LAST - this must be the final step
+    .add_local_dir("../..", remote_path="/app")
 )
 
 # Persistent volumes
@@ -68,8 +68,8 @@ SCALEDOWN_WINDOW = 300
 def web():
     """FastAPI app that runs inside the GPU container with ComfyUI"""
     import sys
-    sys.path.insert(0, "/app")
-    sys.path.insert(0, "/app/modal/apps")
+    sys.path.insert(0, "/app")  # ComfyUI root
+    sys.path.insert(0, "/app/modal/apps")  # For b2_storage module
     
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import JSONResponse
