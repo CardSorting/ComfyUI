@@ -162,27 +162,42 @@ SCALEDOWN_WINDOW = 300  # Container idle time before scaling down (5 minutes)
 # Note: startup_timeout can be added if ComfyUI initialization is slow
 # Example: startup_timeout=120  # Allow 2 minutes for container initialization
 
-# Handle secrets gracefully - make them optional
-# If secrets don't exist, the app will still work but B2/Civitai features won't
+# Handle secrets - these are required for full functionality
+# B2 secret: Enables automatic image uploads to Backblaze B2
+# Civitai secret: Enables model downloads from Civitai
+# 
+# To set up secrets, run: ./modal/setup_secrets.sh
+# Or see: modal/SETUP_SECRETS.md
 secrets_list = []
 b2_secret = None
 civitai_secret = None
+missing_secrets = []
 
 try:
     b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
     secrets_list.append(b2_secret)
-    print("✅ Backblaze B2 secret found")
-except (Exception, KeyError, ValueError) as e:
-    # Secret doesn't exist - app will work but B2 uploads will be disabled
-    print(f"⚠️  Backblaze B2 secret not found: {type(e).__name__} - B2 uploads will be disabled")
+except Exception:
+    missing_secrets.append("backblaze-b2-credentials (B2 uploads will be disabled)")
 
 try:
     civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
     secrets_list.append(civitai_secret)
-    print("✅ Civitai API key secret found")
-except (Exception, KeyError, ValueError) as e:
-    # Secret doesn't exist - app will work but Civitai downloads may be limited
-    print(f"⚠️  Civitai API key secret not found: {type(e).__name__} - Civitai downloads will be limited")
+except Exception:
+    missing_secrets.append("civitai-api-key (Civitai downloads may be limited)")
+
+# Show helpful message if secrets are missing (only during deployment, not at runtime)
+if missing_secrets:
+    import sys
+    # Only show during deployment, not in running containers
+    if hasattr(sys, 'argv') and 'deploy' in ' '.join(sys.argv):
+        print("\n" + "="*70)
+        print("⚠️  Missing Secrets (Optional but Recommended):")
+        for secret in missing_secrets:
+            print(f"   - {secret}")
+        print("\n📖 To set up secrets, run:")
+        print("   ./modal/setup_secrets.sh")
+        print("\n   Or see: modal/SETUP_SECRETS.md")
+        print("="*70 + "\n")
 
 
 # ComfyUI Service with integrated FastAPI
