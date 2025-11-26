@@ -14,36 +14,29 @@ import os
 # Modal app configuration
 app = modal.App("comfyui-api")
 
-# STRATEGY: Use cached base image with PyTorch pre-installed
-# This dramatically speeds up deployments (2-5 min vs 15-20 min)
-# 
-# First time setup:
-#   1. Deploy base image: modal deploy modal/apps/base_image.py (~15-20 min, one time)
-#   2. Then deploy this app: modal deploy modal/apps/modal_app_fastapi.py (~2-5 min)
+# STRATEGY: Build image with PyTorch
+# For faster deployments, deploy base_image.py first, then use:
+#   base_image = modal.Image.from_name("comfyui-base-image", create_if_missing=False)
+#   image = base_image.pip_install(...)
 #
-# If base image doesn't exist, it will fall back to installing PyTorch fresh
+# For now, building from scratch to avoid recursive loops
+# TODO: After base image is stable, switch to using Image.from_name()
 
-# Try to use cached base image (fast - PyTorch already installed)
-# If it doesn't exist, Modal will raise an error and we'll handle it
-try:
-    base_image = modal.Image.from_name("comfyui-base-image", create_if_missing=False)
-except Exception:
-    # Fallback: Build image from scratch (slow - installs PyTorch)
-    # This happens if base image hasn't been deployed yet
-    base_image = (
-        modal.Image.debian_slim(python_version="3.11")
-        .apt_install(
-            "git", "wget", "curl", "build-essential",
-            "libglib2.0-0", "libsm6", "libxext6", "libxrender-dev",
-            "libgomp1", "libgl1-mesa-glx",
-        )
-        # PyTorch installation - this is the slowest step (~10-15 minutes)
-        # If this stalls, check Modal dashboard for progress
-        .pip_install(
-            "torch", "torchvision", "torchaudio",
-            index_url="https://download.pytorch.org/whl/cu121"
-        )
+# Build base image from scratch
+base_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install(
+        "git", "wget", "curl", "build-essential",
+        "libglib2.0-0", "libsm6", "libxext6", "libxrender-dev",
+        "libgomp1", "libgl1-mesa-glx",
     )
+    # PyTorch installation - this is the slowest step (~10-15 minutes)
+    # If this stalls, check Modal dashboard for progress
+    .pip_install(
+        "torch", "torchvision", "torchaudio",
+        index_url="https://download.pytorch.org/whl/cu121"
+    )
+)
 
 # Build final image from base (or from scratch if base not found)
 image = (
