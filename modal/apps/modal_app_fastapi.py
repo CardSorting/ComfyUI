@@ -14,22 +14,40 @@ import os
 # Modal app configuration
 app = modal.App("comfyui-api")
 
-# Define the container image
-# Using optimized build with better error handling
-# PyTorch installation is the slowest step (~10-15 min) but necessary
+# STRATEGY: Use cached base image with PyTorch pre-installed
+# This dramatically speeds up deployments (2-5 min vs 15-20 min)
+# 
+# First time setup:
+#   1. Deploy base image: modal deploy modal/apps/base_image.py (~15-20 min, one time)
+#   2. Then deploy this app: modal deploy modal/apps/modal_app_fastapi.py (~2-5 min)
+#
+# If base image doesn't exist, it will fall back to installing PyTorch fresh
+
+# Try to use cached base image (fast - PyTorch already installed)
+# If it doesn't exist, Modal will raise an error and we'll handle it
+try:
+    base_image = modal.Image.from_name("comfyui-base-image", create_if_missing=False)
+except Exception:
+    # Fallback: Build image from scratch (slow - installs PyTorch)
+    # This happens if base image hasn't been deployed yet
+    base_image = (
+        modal.Image.debian_slim(python_version="3.11")
+        .apt_install(
+            "git", "wget", "curl", "build-essential",
+            "libglib2.0-0", "libsm6", "libxext6", "libxrender-dev",
+            "libgomp1", "libgl1-mesa-glx",
+        )
+        # PyTorch installation - this is the slowest step (~10-15 minutes)
+        # If this stalls, check Modal dashboard for progress
+        .pip_install(
+            "torch", "torchvision", "torchaudio",
+            index_url="https://download.pytorch.org/whl/cu121"
+        )
+    )
+
+# Build final image from base (or from scratch if base not found)
 image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install(
-        "git", "wget", "curl", "build-essential",
-        "libglib2.0-0", "libsm6", "libxext6", "libxrender-dev",
-        "libgomp1", "libgl1-mesa-glx",
-    )
-    # PyTorch installation - this is the slowest step (~10-15 minutes)
-    # If this stalls, check Modal dashboard for progress
-    .pip_install(
-        "torch", "torchvision", "torchaudio",
-        index_url="https://download.pytorch.org/whl/cu121"
-    )
+    base_image
     # Other dependencies - much faster (~2-3 minutes)
     .pip_install(
         "torchsde", "numpy>=1.25.0", "einops",
