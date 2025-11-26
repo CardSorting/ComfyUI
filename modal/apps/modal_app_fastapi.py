@@ -1,28 +1,31 @@
 """
 ComfyUI on Modal.com - FastAPI Version
 
-This version uses FastAPI to wrap ComfyUI's functionality.
-FastAPI is well-supported by Modal and will work reliably.
+Serverless ComfyUI API deployment using Modal and FastAPI.
+
+Features:
+- GPU-accelerated image generation (NVIDIA A10G)
+- Persistent model storage via Modal Volumes
+- Optional Backblaze B2 integration for image uploads
+- Optional Civitai API integration for model downloads
 
 Usage:
-    modal deploy modal_app_fastapi.py
+    modal deploy modal/apps/modal_app_fastapi.py
 """
 
 import modal
 import os
+from pathlib import Path
 
 # Modal app configuration
 app = modal.App("comfyui-api")
 
-# STRATEGY: Build image with PyTorch
-# For faster deployments, deploy base_image.py first, then use:
-#   base_image = modal.Image.from_name("comfyui-base-image", create_if_missing=False)
-#   image = base_image.pip_install(...)
-#
-# For now, building from scratch to avoid recursive loops
-# TODO: After base image is stable, switch to using Image.from_name()
+# Get the absolute path to ComfyUI root (parent of modal/apps/)
+SCRIPT_DIR = Path(__file__).parent.resolve()
+COMFYUI_ROOT = SCRIPT_DIR.parent.parent
 
-# Build base image from scratch
+# Build the container image
+# IMPORTANT: All image building happens at deploy time, so we use absolute paths
 base_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(
@@ -31,14 +34,13 @@ base_image = (
         "libgomp1", "libgl1-mesa-glx",
     )
     # PyTorch installation - this is the slowest step (~10-15 minutes)
-    # If this stalls, check Modal dashboard for progress
     .pip_install(
         "torch", "torchvision", "torchaudio",
         index_url="https://download.pytorch.org/whl/cu121"
     )
 )
 
-# Build final image from base (or from scratch if base not found)
+# Build final image with other dependencies
 image = (
     base_image
     # Other dependencies - much faster (~2-3 minutes)
@@ -54,19 +56,18 @@ image = (
         "fastapi[standard]", "requests",
         "boto3", "botocore",  # For Backblaze B2 S3-compatible uploads
     )
-    # Add ComfyUI root directory LAST - this must be the final step
-    # Exclude large/unnecessary directories to speed up deployment
+    # Add ComfyUI root directory using absolute path
     # Use copy=False to add files at runtime (not baked into image) - faster builds
     .add_local_dir(
-        "../..", 
+        str(COMFYUI_ROOT), 
         remote_path="/app",
-        copy=False,  # Files added at runtime, not during build - much faster!
+        copy=False,
         ignore=[
             # Exclude model directories (use volumes instead)
             "models/**",
             "output/**",
             "input/**",
-            "!input/example.png",  # Keep example image
+            "!input/example.png",
             
             # Exclude cache and build artifacts
             "**/__pycache__/**",
@@ -89,13 +90,13 @@ image = (
             "custom_nodes/**/*.ckpt",
             "custom_nodes/**/.git/**",
             
-            # Exclude test files and documentation (not needed at runtime)
+            # Exclude test files and documentation
             "tests/**",
             "tests-unit/**",
             "docs/**",
             "*.md",
-            "!README.md",  # Keep main README
-            "!modal/**/*.md",  # Keep modal docs
+            "!README.md",
+            "!modal/**/*.md",
             
             # Exclude development files
             ".vscode/**",
@@ -108,7 +109,7 @@ image = (
             
             # Exclude deployment scripts and configs
             "*.sh",
-            "!modal/**/*.sh",  # Keep modal scripts
+            "!modal/**/*.sh",
             "docker-compose*.yml",
             "Dockerfile*",
             "*.service",
@@ -144,53 +145,36 @@ image = (
     )
 )
 
-# Persistent volumes
+# Persistent volumes - these are resolved at deploy time, which is fine
 models_volume = modal.Volume.from_name("comfyui-models", create_if_missing=True)
 outputs_volume = modal.Volume.from_name("comfyui-outputs", create_if_missing=True)
 
 # GPU and timeout configuration
-GPU_CONFIG = "A10G"  # String format is correct (new Modal API)
-TIMEOUT = 600  # Function execution timeout (10 minutes) - max 24 hours
+GPU_CONFIG = "A10G"
+TIMEOUT = 600  # Function execution timeout (10 minutes)
 SCALEDOWN_WINDOW = 300  # Container idle time before scaling down (5 minutes)
-# Note: startup_timeout can be added if ComfyUI initialization is slow
-# Example: startup_timeout=120  # Allow 2 minutes for container initialization
 
-# Handle secrets - these are required for full functionality
-# B2 secret: Enables automatic image uploads to Backblaze B2
-# Civitai secret: Enables model downloads from Civitai
-# 
-# To set up secrets, run: ./modal/setup_secrets.sh
-# Or see: modal/SETUP_SECRETS.md
-secrets_list = []
-b2_secret = None
-civitai_secret = None
-missing_secrets = []
 
-try:
-    b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
-    secrets_list.append(b2_secret)
-except Exception:
-    missing_secrets.append("backblaze-b2-credentials (B2 uploads will be disabled)")
-
-try:
-    civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
-    secrets_list.append(civitai_secret)
-except Exception:
-    missing_secrets.append("civitai-api-key (Civitai downloads may be limited)")
-
-# Show helpful message if secrets are missing (only during deployment, not at runtime)
-if missing_secrets:
-    import sys
-    # Only show during deployment, not in running containers
-    if hasattr(sys, 'argv') and 'deploy' in ' '.join(sys.argv):
-        print("\n" + "="*70)
-        print("⚠️  Missing Secrets (Optional but Recommended):")
-        for secret in missing_secrets:
-            print(f"   - {secret}")
-        print("\n📖 To set up secrets, run:")
-        print("   ./modal/setup_secrets.sh")
-        print("\n   Or see: modal/SETUP_SECRETS.md")
-        print("="*70 + "\n")
+def _get_secrets_list():
+    """
+    Get secrets lazily - only called when actually needed.
+    This prevents issues with secret resolution during module import.
+    """
+    secrets = []
+    
+    try:
+        b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
+        secrets.append(b2_secret)
+    except Exception:
+        pass  # Secret doesn't exist
+    
+    try:
+        civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
+        secrets.append(civitai_secret)
+    except Exception:
+        pass  # Secret doesn't exist
+    
+    return secrets
 
 
 # ComfyUI Service with integrated FastAPI
@@ -203,7 +187,7 @@ if missing_secrets:
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
-    secrets=secrets_list if secrets_list else [],  # Empty list if no secrets exist
+    secrets=_get_secrets_list(),
 )
 @modal.asgi_app()
 def web():
@@ -213,13 +197,13 @@ def web():
     sys.path.insert(0, "/app/modal/apps")  # For b2_storage module
     
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, FileResponse
     from pydantic import BaseModel
     import uuid
     import json
     import time
     
-    # Set environment variables
+    # Set environment variables for headless mode
     os.environ['COMFYUI_HEADLESS'] = '1'
     os.environ['DISABLE_PROGRESS_BARS'] = '1'
     os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
@@ -233,7 +217,6 @@ def web():
     
     # Configure folder paths to use the Modal volumes BEFORE importing main
     folder_paths.set_output_directory('/outputs')
-    # Add as default paths (insert at position 0) so they're checked first
     folder_paths.add_model_folder_path("checkpoints", "/models/checkpoints", is_default=True)
     folder_paths.add_model_folder_path("vae", "/models/vae", is_default=True)
     folder_paths.add_model_folder_path("loras", "/models/loras", is_default=True)
@@ -251,10 +234,8 @@ def web():
     
     # Configure for headless mode
     args.headless = True
-    # Disable problematic custom nodes that require dependencies not available in serverless
-    # (comfyui-impact-pack and comfyui-impact-subpack require cv2/OpenCV)
     args.disable_all_custom_nodes = True
-    args.whitelist_custom_nodes = ["websocket_image_save.py"]  # Only allow core custom nodes
+    args.whitelist_custom_nodes = ["websocket_image_save.py"]
     
     print("🚀 Initializing ComfyUI...")
     
@@ -287,6 +268,7 @@ def web():
     except Exception as e:
         print(f"⚠️  Backblaze B2 storage initialization failed: {type(e).__name__}: {e}")
         print("   Files will be served from Modal volumes")
+        
         # Create a dummy b2_storage object to prevent errors
         class DummyB2Storage:
             def is_enabled(self): return False
@@ -305,30 +287,19 @@ def web():
     class PromptRequest(BaseModel):
         prompt: dict
         client_id: str | None = None
-        upload_to_b2: bool = True  # Auto-upload to B2 by default
-        wait_for_completion: bool = False  # Set to True for synchronous execution
+        upload_to_b2: bool = True
+        wait_for_completion: bool = False
     
     def wait_for_execution(prompt_id: str, timeout: int = 600) -> dict:
-        """
-        Wait for a workflow execution to complete and return results
-        
-        Args:
-            prompt_id: The prompt ID to wait for
-            timeout: Maximum time to wait in seconds
-            
-        Returns:
-            Dict with execution status and output files
-        """
+        """Wait for a workflow execution to complete and return results"""
         start_time = time.time()
         
         while time.time() - start_time < timeout:
-            # Check history for this prompt
             history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
             
             if prompt_id in history:
                 execution_data = history[prompt_id]
                 
-                # Check if execution is complete
                 if 'outputs' in execution_data:
                     return {
                         "status": "completed",
@@ -344,23 +315,19 @@ def web():
                         "execution_time": time.time() - start_time
                     }
             
-            # Check queue status
             current_queue = prompt_server.prompt_queue.get_current_queue_volatile()
             queue_running = current_queue[0]
             queue_pending = current_queue[1]
             
-            # Check if still in queue
             still_queued = any(
                 item[1] == prompt_id 
                 for item in queue_running + queue_pending
             )
             
             if not still_queued:
-                # Not in queue but not in history - might have failed
                 time.sleep(0.5)
                 continue
             
-            # Still processing, wait a bit
             time.sleep(1)
         
         return {
@@ -370,20 +337,10 @@ def web():
         }
     
     def upload_outputs_to_b2(prompt_id: str, outputs: dict) -> dict:
-        """
-        Upload output files to Backblaze B2
-        
-        Args:
-            prompt_id: The prompt ID
-            outputs: Output data from ComfyUI execution
-            
-        Returns:
-            Dict mapping node IDs to B2 upload results
-        """
+        """Upload output files to Backblaze B2"""
         if not b2_storage.is_enabled():
             return {"error": "B2 storage is not enabled"}
         
-        import os
         upload_results = {}
         
         for node_id, node_output in outputs.items():
@@ -396,14 +353,12 @@ def web():
                     subfolder = img_data.get('subfolder', '')
                     
                     if filename:
-                        # Construct the full file path
                         if subfolder:
                             file_path = os.path.join('/outputs', subfolder, filename)
                         else:
                             file_path = os.path.join('/outputs', filename)
                         
                         if os.path.exists(file_path):
-                            # Upload to B2
                             metadata = {
                                 'prompt_id': prompt_id,
                                 'node_id': node_id,
@@ -463,15 +418,10 @@ def web():
     
     @web_app.post("/prompt")
     async def queue_prompt(request: PromptRequest):
-        """
-        Queue a ComfyUI workflow for execution
-        
-        Set wait_for_completion=True for synchronous execution with B2 upload
-        """
+        """Queue a ComfyUI workflow for execution"""
         try:
             prompt_id = str(uuid.uuid4())
             
-            # Validate workflow (needs prompt_id, prompt dict, and partial_execution_list)
             valid = await execution.validate_prompt(prompt_id, request.prompt, None)
             if not valid[0]:
                 return {
@@ -480,29 +430,24 @@ def web():
                     "node_errors": valid[3] if len(valid) > 3 else {}
                 }
             
-            # Extract the outputs to execute from validation result
-            outputs_to_execute = valid[2]  # This is critical!
+            outputs_to_execute = valid[2]
             extra_data = {}
             if request.client_id:
                 extra_data["client_id"] = request.client_id
             
-            # Queue the workflow with proper outputs
             number = prompt_server.number
             prompt_server.number += 1
             
             prompt_server.prompt_queue.put((number, prompt_id, request.prompt, extra_data, outputs_to_execute))
             
-            # If synchronous execution is requested, wait for completion
             if request.wait_for_completion:
                 execution_result = wait_for_execution(prompt_id, timeout=TIMEOUT)
                 
-                # If B2 upload is enabled and execution completed successfully
                 if (request.upload_to_b2 and 
                     b2_storage.is_enabled() and 
                     execution_result.get('status') == 'completed' and 
                     'outputs' in execution_result):
                     
-                    # Upload outputs to B2
                     b2_uploads = upload_outputs_to_b2(prompt_id, execution_result['outputs'])
                     execution_result['b2_uploads'] = b2_uploads
                 
@@ -514,7 +459,6 @@ def web():
                     "execution": execution_result
                 }
             
-            # Asynchronous mode - just return queue info
             return {
                 "prompt_id": prompt_id,
                 "number": number,
@@ -529,7 +473,6 @@ def web():
     async def get_queue():
         """Get current queue status"""
         try:
-            # Use the correct method from ComfyUI's PromptQueue
             current_queue = prompt_server.prompt_queue.get_current_queue_volatile()
             return {
                 "queue_running": current_queue[0],
@@ -566,7 +509,6 @@ def web():
                     detail="Backblaze B2 storage is not enabled"
                 )
             
-            # Get execution history
             history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
             
             if prompt_id not in history:
@@ -583,7 +525,6 @@ def web():
                     detail="Execution has no outputs to upload"
                 )
             
-            # Upload to B2
             b2_uploads = upload_outputs_to_b2(prompt_id, execution_data['outputs'])
             
             return {
@@ -604,7 +545,6 @@ def web():
             device = comfy.model_management.get_torch_device()
             device_name = comfy.model_management.get_torch_device_name(device)
             
-            # Get memory info - these functions return single int by default
             vram_free = comfy.model_management.get_free_memory(device)
             vram_total = comfy.model_management.get_total_memory(device)
             
@@ -645,11 +585,9 @@ def web():
             
             storage_info = b2_storage.get_storage_info()
             
-            # Try to list recent files
             recent_files = []
             try:
                 files = b2_storage.list_files(prefix="generations/")
-                # Get last 10 files
                 recent_files = sorted(
                     files, 
                     key=lambda x: x.get('LastModified', ''), 
@@ -676,18 +614,11 @@ def web():
     
     @web_app.post("/execute_and_upload")
     async def execute_and_upload(request: PromptRequest):
-        """
-        Simplified endpoint: Execute workflow and automatically upload to B2
-        
-        This is a convenience endpoint that always waits for completion
-        and uploads to B2 if enabled. Perfect for backend integration.
-        """
+        """Execute workflow and automatically upload to B2"""
         try:
-            # Force synchronous execution with B2 upload
             request.wait_for_completion = True
             request.upload_to_b2 = True
             
-            # Use the main prompt endpoint logic
             result = await queue_prompt(request)
             
             return result
@@ -699,10 +630,8 @@ def web():
     async def debug_folder_paths():
         """Debug endpoint to see what folders ComfyUI knows about"""
         try:
-            import os
             debug_info = {}
             
-            # Get configured paths
             for folder_type in ["checkpoints", "vae", "loras", "controlnet"]:
                 paths = folder_paths.get_folder_paths(folder_type)
                 debug_info[folder_type] = {
@@ -710,7 +639,6 @@ def web():
                     "files": []
                 }
                 
-                # Check what files exist in each path
                 for path in paths:
                     if os.path.exists(path):
                         try:
@@ -723,7 +651,6 @@ def web():
                     else:
                         debug_info[folder_type]["path_exists"] = False
             
-            # Get actual available models from folder_paths
             debug_info["available_checkpoints"] = folder_paths.get_filename_list("checkpoints")
             
             return debug_info
@@ -734,7 +661,6 @@ def web():
     async def list_outputs():
         """List all output files"""
         try:
-            import os
             outputs = []
             output_dir = "/outputs"
             
@@ -757,9 +683,6 @@ def web():
     async def get_output_file(filename: str):
         """Download a specific output file"""
         try:
-            from fastapi.responses import FileResponse
-            import os
-            
             filepath = os.path.join("/outputs", filename)
             if not os.path.exists(filepath):
                 raise HTTPException(status_code=404, detail="File not found")
@@ -774,8 +697,6 @@ def web():
     async def get_object_info():
         """Get available node information"""
         try:
-            import nodes
-            
             out = {}
             for node_class_name in nodes.NODE_CLASS_MAPPINGS:
                 try:
@@ -805,34 +726,25 @@ def web():
     return web_app
 
 
+# Model management functions
 @app.function(
     image=image,
     volumes={"/models": models_volume},
     timeout=7200,  # 2 hours for large models
-    secrets=[civitai_secret] if civitai_secret else [],  # Empty list if secret doesn't exist
+    secrets=_get_secrets_list(),
 )
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
-    """
-    Download a single model from URL to the persistent volume
-    
-    Args:
-        url: Direct download URL for the model (supports Civitai, HuggingFace, etc.)
-        category: Model category (checkpoints, vae, loras, controlnet, clip_vision, etc.)
-        filename: Optional filename (auto-detected from URL if not provided)
-    """
+    """Download a single model from URL to the persistent volume"""
     import urllib.request
-    import os
     from urllib.parse import urlparse, unquote
+    import requests
     
     print(f"📥 Downloading model to /models/{category}/")
     
-    # Create model directory
     model_dir = f"/models/{category}"
     os.makedirs(model_dir, exist_ok=True)
     
-    # Determine filename
     if not filename:
-        # Try to extract filename from URL
         parsed = urlparse(url)
         filename = unquote(os.path.basename(parsed.path))
         if not filename or filename == '':
@@ -840,38 +752,30 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
     
     file_path = os.path.join(model_dir, filename)
     
-    # Check if already exists
     if os.path.exists(file_path):
         file_size = os.path.getsize(file_path)
         print(f"⚠️  File already exists: {filename} ({file_size / 1024 / 1024:.1f} MB)")
         print(f"   Skipping download. Delete it first if you want to re-download.")
         return {"status": "skipped", "path": file_path, "size": file_size}
     
-    # Download with progress
     print(f"🌐 Downloading: {filename}")
     print(f"   From: {url[:80]}...")
     
-    # Check if this is a Civitai URL and add authentication if available
     is_civitai = 'civitai.com' in url.lower()
     civitai_api_key = os.environ.get('CIVITAI_API_KEY')
     
     if is_civitai and civitai_api_key:
         print(f"   🔑 Using Civitai API authentication")
-        # Add API key to URL
         separator = '&' if '?' in url else '?'
         url = f"{url}{separator}token={civitai_api_key}"
     elif is_civitai and not civitai_api_key:
         print(f"   ⚠️  Civitai URL detected but no API key found. Download may fail for private models.")
     
-    # Download with retry logic for large files
     max_retries = 3
     retry_count = 0
     
     while retry_count < max_retries:
         try:
-            # Use requests for better handling of large files
-            import requests
-            
             print(f"   Attempt {retry_count + 1}/{max_retries}")
             response = requests.get(url, stream=True, timeout=300)
             response.raise_for_status()
@@ -880,7 +784,7 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
             
             with open(file_path, 'wb') as f:
                 downloaded = 0
-                chunk_size = 8192 * 16  # 128KB chunks
+                chunk_size = 8192 * 16
                 
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
@@ -893,17 +797,15 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
                             mb_total = total_size / 1024 / 1024
                             print(f"   Progress: {percent:.1f}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end='\r')
             
-            print()  # New line after progress
+            print()
             
             file_size = os.path.getsize(file_path)
             
-            # Verify file size if we know the expected size
             if total_size > 0 and file_size < total_size:
                 raise Exception(f"Download incomplete: {file_size}/{total_size} bytes")
             
             print(f"✅ Downloaded: {filename} ({file_size / 1024 / 1024:.1f} MB)")
             
-            # Commit volume changes
             models_volume.commit()
             print("💾 Volume committed!")
             
@@ -921,13 +823,11 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
             
             if retry_count < max_retries:
                 import time
-                wait_time = retry_count * 5  # Progressive backoff: 5s, 10s
+                wait_time = retry_count * 5
                 print(f"   Retrying in {wait_time} seconds...")
                 time.sleep(wait_time)
-                # Don't delete the file yet, we might be able to resume
             else:
                 print(f"❌ Failed after {max_retries} attempts")
-                # Clean up partial download
                 if os.path.exists(file_path):
                     os.remove(file_path)
                 raise
@@ -940,8 +840,6 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
 )
 def list_models():
     """List all models in the persistent volume"""
-    import os
-    
     categories = [
         "checkpoints", "vae", "loras", "controlnet", 
         "clip_vision", "unet", "embeddings", "upscale_models"
@@ -980,8 +878,6 @@ def list_models():
 )
 def delete_model(category: str, filename: str):
     """Delete a model from the persistent volume"""
-    import os
-    
     file_path = f"/models/{category}/{filename}"
     
     if not os.path.exists(file_path):
@@ -1000,10 +896,10 @@ def delete_model(category: str, filename: str):
 @app.local_entrypoint()
 def main():
     """Local entrypoint"""
-    print("🌐 ComfyUI Modal Deployment (FastAPI Version)")
+    print("🌐 ComfyUI Modal Deployment (FastAPI Version - Fixed)")
     print("=" * 50)
     print("\nTo deploy:")
-    print("  modal deploy modal_app_fastapi.py")
+    print("  modal deploy modal/apps/modal_app_fastapi_fixed.py")
     print("\nYour endpoint will be:")
     print("  https://{workspace}--comfyui-api-web.modal.run")
     print("\nExample endpoints:")

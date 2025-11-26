@@ -1,102 +1,130 @@
 # ComfyUI Modal Deployment
 
-This directory contains all files related to deploying and managing ComfyUI on Modal.com.
+Deploy ComfyUI as a serverless API on Modal.com with GPU acceleration.
+
+## 🚀 Quick Start
+
+### 1. Deploy the App
+
+```bash
+modal deploy modal/apps/modal_app_fastapi.py
+```
+
+Your endpoint will be available at:
+```
+https://YOUR_WORKSPACE--comfyui-api-web.modal.run
+```
+
+### 2. Download a Model
+
+```bash
+# Download SDXL Turbo (fast, good quality)
+modal run modal/apps/modal_app_fastapi.py::download_model \
+  --url "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors" \
+  --category checkpoints
+
+# List your models
+modal run modal/apps/modal_app_fastapi.py::list_models
+```
+
+### 3. Test the API
+
+```bash
+curl https://YOUR_WORKSPACE--comfyui-api-web.modal.run/
+curl https://YOUR_WORKSPACE--comfyui-api-web.modal.run/system_stats
+```
 
 ## 📁 Directory Structure
 
 ```
 modal/
-├── apps/                       # Modal applications
-│   └── modal_app_fastapi.py   # Main FastAPI ComfyUI app
-├── scripts/                    # Helper scripts
-│   ├── modal_model_manager.sh # Model management CLI
-│   ├── modal_download_model.py # Python model downloader
-│   └── modal_setup_wizard.py  # Setup wizard
-├── tests/                      # Test files
-│   ├── modal_test_endpoints.py # Endpoint testing suite
-│   ├── modal_test_webserver.py # Web server test
-│   └── modal_test.py           # Basic tests
-├── docs/                       # Documentation
-│   ├── MODAL_MODEL_SETUP.md    # Model download guide
-│   ├── POPULAR_MODELS.md       # Popular model URLs
-│   └── MODAL_*.md              # Other guides
-└── modal_requirements.txt      # Modal-specific requirements
+├── apps/
+│   ├── modal_app_fastapi.py   # Main deployment file
+│   ├── b2_storage.py          # Backblaze B2 integration
+│   └── *.md                   # B2 documentation
+├── docs/                      # Detailed documentation
+├── scripts/                   # Helper scripts
+├── tests/                     # Test files
+├── SETUP_SECRETS.md          # Secret configuration guide
+└── setup_secrets.sh          # Secret setup script
 ```
 
-## 🚀 Quick Start
+## 🔧 Optional: Configure Secrets
 
-### Deploy the App
+For full functionality, set up these optional secrets:
+
+### Backblaze B2 (for image uploads)
 ```bash
-modal deploy modal/apps/modal_app_fastapi.py
+modal secret create backblaze-b2-credentials \
+  B2_APPLICATION_KEY_ID=your_key_id \
+  B2_APPLICATION_KEY=your_key \
+  B2_BUCKET_NAME=your_bucket
 ```
 
-### Manage Models
+### Civitai API (for model downloads)
 ```bash
-# List models
-modal/scripts/modal_model_manager.sh list
-
-# Download a model
-modal/scripts/modal_model_manager.sh download-url "URL" "CATEGORY"
-
-# Delete a model
-modal/scripts/modal_model_manager.sh delete "CATEGORY" "FILENAME"
+modal secret create civitai-api-key \
+  CIVITAI_API_KEY=your_api_key
 ```
 
-### Test the Deployment
-```bash
-python modal/tests/modal_test_endpoints.py YOUR_ENDPOINT_URL
-```
-
-## 📚 Documentation
-
-- **[Model Setup Guide](docs/MODAL_MODEL_SETUP.md)** - Complete guide for downloading models
-- **[Popular Models](docs/POPULAR_MODELS.md)** - Ready-to-use model download commands
-- **[Deployment Guide](docs/MODAL_DEPLOYMENT_GUIDE.md)** - Full deployment instructions
-- **[Quick Start](docs/MODAL_QUICKSTART.md)** - Get started quickly
-
-## 🔗 Your Endpoint
-
-After deployment, your endpoint will be:
-```
-https://YOUR_WORKSPACE--comfyui-api-web.modal.run
-```
+Or run `./modal/setup_secrets.sh` for an interactive setup.
 
 ## 💡 Common Commands
 
 ```bash
-# Deploy the app
+# Deploy
 modal deploy modal/apps/modal_app_fastapi.py
 
-# Check app status
+# Check status
 modal app list
 
 # View logs
 modal app logs comfyui-api
 
-# Stop the app
+# Stop app
 modal app stop comfyui-api
 
-# Download SDXL Turbo
-modal/scripts/modal_model_manager.sh download-url \
-  "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors" \
-  checkpoints
+# Download model
+modal run modal/apps/modal_app_fastapi.py::download_model --url "URL" --category checkpoints
+
+# List models
+modal run modal/apps/modal_app_fastapi.py::list_models
+
+# Delete model
+modal run modal/apps/modal_app_fastapi.py::delete_model --category checkpoints --filename "model.safetensors"
 ```
 
-## 🛠️ Development
+## 📚 API Endpoints
 
-### Update the App
-1. Edit `modal/apps/modal_app_fastapi.py`
-2. Run `modal deploy modal/apps/modal_app_fastapi.py`
-3. Test with `python modal/tests/modal_test_endpoints.py`
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | API information |
+| `/prompt` | POST | Queue a workflow |
+| `/execute_and_upload` | POST | Execute + upload to B2 |
+| `/queue` | GET | Queue status |
+| `/history` | GET | Execution history |
+| `/history/{id}` | GET | Specific execution |
+| `/system_stats` | GET | GPU/system info |
+| `/outputs` | GET | List output files |
+| `/outputs/{file}` | GET | Download output file |
+| `/object_info` | GET | Available nodes |
 
-### Add New Models
-1. See `docs/POPULAR_MODELS.md` for examples
-2. Use `modal/scripts/modal_model_manager.sh download-url`
+## 📚 Documentation
+
+- **[Quick Start](docs/MODAL_QUICKSTART.md)** - Get started quickly
+- **[Deployment Guide](docs/MODAL_DEPLOYMENT_GUIDE.md)** - Full deployment instructions
+- **[Model Setup](docs/MODAL_MODEL_SETUP.md)** - Download and manage models
+- **[Popular Models](docs/POPULAR_MODELS.md)** - Ready-to-use model URLs
+- **[B2 Integration](apps/BACKBLAZE_B2_INTEGRATION.md)** - Backblaze B2 setup
+
+## 🖥️ Hardware
+
+- **GPU**: NVIDIA A10G (24GB VRAM)
+- **Timeout**: 10 minutes per request
+- **Scale-down**: 5 minutes idle
 
 ## 📞 Support
 
-For issues or questions:
-- Check `docs/` for detailed guides
 - View logs: `modal app logs comfyui-api`
-- Review `START_HERE.md` in the root directory
-
+- Check status: `modal app list`
+- Modal docs: https://modal.com/docs
