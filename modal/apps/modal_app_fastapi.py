@@ -16,6 +16,7 @@ Usage:
 import modal
 import os
 from pathlib import Path
+from typing import Tuple, Optional
 
 # Modal app configuration
 app = modal.App("comfyui-api")
@@ -876,6 +877,89 @@ def web():
     timeout=7200,  # 2 hours for large models
     secrets=_get_secrets_list(),
 )
+def _sanitize_filename(name: str) -> str:
+    """Convert a model name to a safe filename"""
+    import re
+    # Remove or replace invalid filename characters
+    # Keep alphanumeric, spaces, hyphens, underscores, dots
+    name = re.sub(r'[<>:"/\\|?*]', '', name)
+    # Replace multiple spaces with single space
+    name = re.sub(r'\s+', ' ', name)
+    # Replace spaces with underscores
+    name = name.replace(' ', '_')
+    # Remove leading/trailing dots and spaces
+    name = name.strip('._ ')
+    # Limit length
+    if len(name) > 200:
+        name = name[:200]
+    return name
+
+def _get_civitai_model_name(url: str, civitai_api_key: str = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract model information from Civitai URL and return (model_name, version_name).
+    Returns (None, None) if unable to fetch.
+    """
+    import re
+    import requests
+    
+    try:
+        # Parse Civitai URL to get model_id and version_id
+        # Pattern: https://civitai.com/models/12345/model-name/versions/67890
+        version_pattern = r'civitai\.com/models/(\d+)/[^/]+/versions/(\d+)'
+        match = re.search(version_pattern, url)
+        if match:
+            model_id = int(match.group(1))
+            version_id = int(match.group(2))
+        else:
+            # Pattern: https://civitai.com/api/download/models/67890
+            download_pattern = r'civitai\.com/api/download/models/(\d+)'
+            match = re.search(download_pattern, url)
+            if match:
+                version_id = int(match.group(1))
+                model_id = None
+            else:
+                # Pattern: https://civitai.com/models/12345/model-name
+                model_pattern = r'civitai\.com/models/(\d+)'
+                match = re.search(model_pattern, url)
+                if match:
+                    model_id = int(match.group(1))
+                    version_id = None
+                else:
+                    return (None, None)
+        
+        # Fetch model info from Civitai API
+        base_url = "https://civitai.com/api/v1"
+        headers = {}
+        if civitai_api_key:
+            headers['Authorization'] = f'Bearer {civitai_api_key}'
+        
+        model_name = None
+        version_name = None
+        
+        # Get version info first (if we have version_id)
+        if version_id:
+            version_url = f"{base_url}/model-versions/{version_id}"
+            response = requests.get(version_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                version_data = response.json()
+                version_name = version_data.get('name', '')
+                if not model_id:
+                    model_id = version_data.get('modelId')
+        
+        # Get model info (if we have model_id)
+        if model_id:
+            model_url = f"{base_url}/models/{model_id}"
+            response = requests.get(model_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                model_data = response.json()
+                model_name = model_data.get('name', '')
+        
+        return (model_name, version_name)
+        
+    except Exception as e:
+        print(f"   ⚠️  Could not fetch model info from Civitai: {e}")
+        return (None, None)
+
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """Download a single model from URL to the persistent volume"""
     import urllib.request
@@ -887,7 +971,37 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
     model_dir = f"/models/{category}"
     os.makedirs(model_dir, exist_ok=True)
     
-    if not filename:
+    is_civitai = 'civitai.com' in url.lower()
+    civitai_api_key = os.environ.get('CIVITAI_API_KEY')
+    
+    # Try to get human-readable name from Civitai API
+    original_filename = filename
+    if not filename and is_civitai:
+        model_name, version_name = _get_civitai_model_name(url, civitai_api_key)
+        if model_name:
+            # Build filename from model name and version
+            name_parts = [_sanitize_filename(model_name)]
+            if version_name:
+                name_parts.append(_sanitize_filename(version_name))
+            
+            # Get file extension from URL
+            parsed = urlparse(url)
+            original_basename = unquote(os.path.basename(parsed.path))
+            if original_basename:
+                # Extract extension
+                ext = os.path.splitext(original_basename)[1] or '.safetensors'
+            else:
+                ext = '.safetensors'
+            
+            filename = '_'.join(name_parts) + ext
+            print(f"   📝 Using human-readable name: {filename}")
+        else:
+            # Fallback to extracting from URL
+            parsed = urlparse(url)
+            filename = unquote(os.path.basename(parsed.path))
+            if not filename or filename == '':
+                filename = "downloaded_model"
+    elif not filename:
         parsed = urlparse(url)
         filename = unquote(os.path.basename(parsed.path))
         if not filename or filename == '':
@@ -903,9 +1017,6 @@ def download_model(url: str, category: str = "checkpoints", filename: str = None
     
     print(f"🌐 Downloading: {filename}")
     print(f"   From: {url[:80]}...")
-    
-    is_civitai = 'civitai.com' in url.lower()
-    civitai_api_key = os.environ.get('CIVITAI_API_KEY')
     
     if is_civitai and civitai_api_key:
         print(f"   🔑 Using Civitai API authentication")
