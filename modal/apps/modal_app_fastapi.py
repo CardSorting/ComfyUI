@@ -203,6 +203,13 @@ def web():
     import json
     import time
     
+    # Reload volumes to ensure we see the latest data
+    # Modal volumes are eventually consistent, so this ensures fresh data on startup
+    print("🔄 Reloading volumes to get latest data...")
+    models_volume.reload()
+    outputs_volume.reload()
+    print("✅ Volumes reloaded")
+    
     # Set environment variables for headless mode
     os.environ['COMFYUI_HEADLESS'] = '1'
     os.environ['DISABLE_PROGRESS_BARS'] = '1'
@@ -217,15 +224,57 @@ def web():
     
     # Configure folder paths to use the Modal volumes BEFORE importing main
     folder_paths.set_output_directory('/outputs')
-    folder_paths.add_model_folder_path("checkpoints", "/models/checkpoints", is_default=True)
-    folder_paths.add_model_folder_path("vae", "/models/vae", is_default=True)
-    folder_paths.add_model_folder_path("loras", "/models/loras", is_default=True)
-    folder_paths.add_model_folder_path("controlnet", "/models/controlnet", is_default=True)
-    folder_paths.add_model_folder_path("clip_vision", "/models/clip_vision", is_default=True)
-    folder_paths.add_model_folder_path("upscale_models", "/models/upscale_models", is_default=True)
-    folder_paths.add_model_folder_path("embeddings", "/models/embeddings", is_default=True)
     
-    print(f"📁 Configured model paths: {folder_paths.get_folder_paths('checkpoints')}")
+    # Ensure model directories exist before adding paths
+    model_dirs = {
+        "checkpoints": "/models/checkpoints",
+        "vae": "/models/vae",
+        "loras": "/models/loras",
+        "controlnet": "/models/controlnet",
+        "clip_vision": "/models/clip_vision",
+        "upscale_models": "/models/upscale_models",
+        "embeddings": "/models/embeddings"
+    }
+    
+    for category, path in model_dirs.items():
+        os.makedirs(path, exist_ok=True)
+        folder_paths.add_model_folder_path(category, path, is_default=True)
+    
+    checkpoint_paths = folder_paths.get_folder_paths('checkpoints')
+    print(f"📁 Configured model paths: {checkpoint_paths}")
+    
+    # Debug: Check if model files exist
+    import glob
+    for path in checkpoint_paths:
+        if os.path.exists(path):
+            files = os.listdir(path)
+            print(f"📦 Files in {path}: {files}")
+            # Check for our model specifically
+            if '2440705' in str(files):
+                print(f"✅ Found model file containing '2440705'")
+        else:
+            print(f"⚠️  Path does not exist: {path}")
+    
+    # Clear the filename cache BEFORE importing ComfyUI modules
+    # This ensures the cache is empty when nodes load and scan for models
+    if hasattr(folder_paths, 'filename_list_cache'):
+        folder_paths.filename_list_cache.clear()
+        print("🔄 Cleared filename cache before ComfyUI init")
+    
+    if hasattr(folder_paths, 'cache_helper'):
+        folder_paths.cache_helper.clear()
+        print("🔄 Cleared cache helper before ComfyUI init")
+    
+    # Touch the checkpoint directory to update its modification time
+    # This forces ComfyUI to rescan even if cache exists
+    import time
+    for path in checkpoint_paths:
+        if os.path.exists(path):
+            try:
+                os.utime(path, None)  # Update access/modification time
+                print(f"🔄 Updated modification time for {path}")
+            except Exception as e:
+                print(f"⚠️  Could not update mtime for {path}: {e}")
     
     # NOW import ComfyUI modules
     import main
@@ -246,6 +295,58 @@ def web():
     # Check how many nodes were loaded
     import nodes
     print(f"📦 Loaded {len(nodes.NODE_CLASS_MAPPINGS)} node types")
+    
+    # Force rescan of checkpoints by clearing ALL caches
+    # The cache uses directory mtime to determine if rescan is needed
+    # So we need to invalidate it properly
+    if hasattr(folder_paths, 'filename_list_cache'):
+        # Remove checkpoints from cache to force rescan
+        if 'checkpoints' in folder_paths.filename_list_cache:
+            del folder_paths.filename_list_cache['checkpoints']
+        print("🔄 Removed checkpoints from filename cache")
+    
+    if hasattr(folder_paths, 'cache_helper'):
+        folder_paths.cache_helper.clear()
+        print("🔄 Cleared cache helper")
+    
+    # Force a fresh scan by calling get_filename_list
+    # This will rescan because cache is empty/invalid
+    try:
+        # Update directory mtime to ensure cache invalidation works
+        checkpoint_paths = folder_paths.get_folder_paths('checkpoints')
+        for path in checkpoint_paths:
+            if os.path.exists(path):
+                # Touch directory to update mtime
+                os.utime(path, None)
+        
+        checkpoint_list = folder_paths.get_filename_list("checkpoints")
+        print(f"📋 Rescanned checkpoints: found {len(checkpoint_list)} models")
+        if checkpoint_list:
+            print(f"   Models: {checkpoint_list[:5]}")
+            
+            # Monkey-patch CheckpointLoaderSimple to always return fresh list
+            from nodes import CheckpointLoaderSimple
+            original_input_types = CheckpointLoaderSimple.INPUT_TYPES
+            
+            @classmethod
+            def dynamic_input_types(cls):
+                # Always get fresh list, bypassing cache
+                folder_paths.filename_list_cache.pop('checkpoints', None)
+                fresh_list = folder_paths.get_filename_list("checkpoints")
+                return {
+                    "required": {
+                        "ckpt_name": (fresh_list, {"tooltip": "The name of the checkpoint (model) to load."}),
+                    }
+                }
+            
+            CheckpointLoaderSimple.INPUT_TYPES = dynamic_input_types
+            print(f"✅ Patched CheckpointLoaderSimple.INPUT_TYPES to use dynamic model list ({len(checkpoint_list)} models)")
+        else:
+            print("⚠️  No models found in rescan - check volume mount")
+    except Exception as e:
+        print(f"⚠️  Error forcing rescan: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Verify the prompt worker thread is running
     import threading
@@ -398,10 +499,17 @@ def web():
         """API information"""
         b2_info = b2_storage.get_storage_info() if b2_storage else {"enabled": False}
         
+        # Get current model count
+        try:
+            checkpoint_count = len(folder_paths.get_filename_list("checkpoints"))
+        except:
+            checkpoint_count = 0
+        
         return {
             "name": "ComfyUI on Modal with Backblaze B2",
-            "version": "1.0.0",
+            "version": "1.1.0",  # Updated version to track deployments
             "status": "running",
+            "models_loaded": checkpoint_count,
             "backblaze_b2": b2_info,
             "endpoints": {
                 "POST /prompt": "Queue a workflow (set wait_for_completion=true for sync + B2 upload)",
@@ -413,6 +521,7 @@ def web():
                 "GET /system_stats": "Get system information",
                 "GET /b2/status": "Get B2 storage status",
                 "POST /interrupt": "Interrupt execution",
+                "POST /reload_models": "Reload volumes and rescan models",
             }
         }
     
@@ -623,6 +732,40 @@ def web():
             
             return result
             
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @web_app.post("/reload_models")
+    async def reload_models():
+        """Reload volumes and rescan all model directories"""
+        try:
+            # Reload volumes to get latest data
+            print("🔄 Reloading volumes...")
+            models_volume.reload()
+            outputs_volume.reload()
+            
+            # Clear all filename caches
+            if hasattr(folder_paths, 'filename_list_cache'):
+                folder_paths.filename_list_cache.clear()
+            if hasattr(folder_paths, 'cache_helper'):
+                folder_paths.cache_helper.clear()
+            
+            # Force rescan of all model types
+            model_types = ["checkpoints", "vae", "loras", "controlnet", "clip_vision", "upscale_models", "embeddings"]
+            results = {}
+            
+            for model_type in model_types:
+                try:
+                    file_list = folder_paths.get_filename_list(model_type)
+                    results[model_type] = len(file_list)
+                except Exception as e:
+                    results[model_type] = f"error: {str(e)}"
+            
+            return {
+                "status": "success",
+                "message": "Volumes reloaded and models rescanned",
+                "model_counts": results
+            }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -870,6 +1013,36 @@ def list_models():
     
     return {"total_files": total_files, "total_size_gb": total_size / 1024 / 1024 / 1024}
 
+
+@app.function(
+    image=image,
+    volumes={"/models": models_volume},
+    timeout=300,
+)
+def rename_model(category: str, old_filename: str, new_filename: str):
+    """Rename a model file in the persistent volume"""
+    import shutil
+    
+    old_path = os.path.join(f"/models/{category}", old_filename)
+    new_path = os.path.join(f"/models/{category}", new_filename)
+    
+    if not os.path.exists(old_path):
+        return {"status": "error", "message": f"File not found: {old_filename}"}
+    
+    if os.path.exists(new_path):
+        return {"status": "error", "message": f"Target file already exists: {new_filename}"}
+    
+    try:
+        shutil.move(old_path, new_path)
+        file_size = os.path.getsize(new_path)
+        return {
+            "status": "success",
+            "old_path": old_path,
+            "new_path": new_path,
+            "size_mb": file_size / 1024 / 1024
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.function(
     image=image,
