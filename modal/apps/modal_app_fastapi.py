@@ -151,16 +151,18 @@ civitai_secret = None
 try:
     b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
     secrets_list.append(b2_secret)
-except Exception:
+    print("✅ Backblaze B2 secret found")
+except (Exception, KeyError, ValueError) as e:
     # Secret doesn't exist - app will work but B2 uploads will be disabled
-    pass
+    print(f"⚠️  Backblaze B2 secret not found: {type(e).__name__} - B2 uploads will be disabled")
 
 try:
     civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
     secrets_list.append(civitai_secret)
-except Exception:
+    print("✅ Civitai API key secret found")
+except (Exception, KeyError, ValueError) as e:
     # Secret doesn't exist - app will work but Civitai downloads may be limited
-    pass
+    print(f"⚠️  Civitai API key secret not found: {type(e).__name__} - Civitai downloads will be limited")
 
 
 # ComfyUI Service with integrated FastAPI
@@ -173,7 +175,7 @@ except Exception:
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
-    secrets=secrets_list if secrets_list else None,  # Only add secrets if they exist
+    secrets=secrets_list if secrets_list else [],  # Empty list if no secrets exist
 )
 @modal.asgi_app()
 def web():
@@ -243,15 +245,27 @@ def web():
     
     print("✅ ComfyUI initialized successfully!")
     
-    # Initialize Backblaze B2 storage
-    from b2_storage import BackblazeB2Storage
-    b2_storage = BackblazeB2Storage()
-    
-    if b2_storage.is_enabled():
-        storage_info = b2_storage.get_storage_info()
-        print(f"☁️  Backblaze B2 enabled: {storage_info['bucket']}")
-    else:
-        print("⚠️  Backblaze B2 storage is disabled - files will be served from Modal")
+    # Initialize Backblaze B2 storage (gracefully handle if not available)
+    b2_storage = None
+    try:
+        from b2_storage import BackblazeB2Storage
+        b2_storage = BackblazeB2Storage()
+        
+        if b2_storage.is_enabled():
+            storage_info = b2_storage.get_storage_info()
+            print(f"☁️  Backblaze B2 enabled: {storage_info['bucket']}")
+        else:
+            print("⚠️  Backblaze B2 storage is disabled - files will be served from Modal")
+    except Exception as e:
+        print(f"⚠️  Backblaze B2 storage initialization failed: {type(e).__name__}: {e}")
+        print("   Files will be served from Modal volumes")
+        # Create a dummy b2_storage object to prevent errors
+        class DummyB2Storage:
+            def is_enabled(self): return False
+            def get_storage_info(self): return {"enabled": False}
+            def upload_file(self, *args, **kwargs): return None
+            def list_files(self, *args, **kwargs): return []
+        b2_storage = DummyB2Storage()
     
     # Create FastAPI app
     web_app = FastAPI(
@@ -767,7 +781,7 @@ def web():
     image=image,
     volumes={"/models": models_volume},
     timeout=7200,  # 2 hours for large models
-    secrets=[civitai_secret] if civitai_secret else None,  # Only if secret exists
+    secrets=[civitai_secret] if civitai_secret else [],  # Empty list if secret doesn't exist
 )
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """

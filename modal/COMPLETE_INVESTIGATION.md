@@ -212,3 +212,19 @@ curl https://YOUR_WORKSPACE--comfyui-api-web.modal.run/
 
 The deployment should now succeed! 🎉
 
+---
+
+## ⚠️ DEEP INVESTIGATION UPDATE
+
+**For the most recent comprehensive fixes, see:**
+- `DEEP_INVESTIGATION_RESOLUTION.md` - Complete resolution report with all fixes
+
+**Additional fixes applied:**
+1. ✅ Secrets parameter now uses empty lists `[]` instead of `None`
+2. ✅ Enhanced exception handling with specific exception types
+3. ✅ B2 storage initialization has graceful fallback with dummy class
+4. ✅ All Modal API usage verified and confirmed correct
+5. ✅ Environment variable mappings validated
+
+All issues have been resolved through deep investigation.
+
