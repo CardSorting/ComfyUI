@@ -139,8 +139,10 @@ outputs_volume = modal.Volume.from_name("comfyui-outputs", create_if_missing=Tru
 
 # GPU and timeout configuration
 GPU_CONFIG = "A10G"  # String format is correct (new Modal API)
-TIMEOUT = 600
-SCALEDOWN_WINDOW = 300
+TIMEOUT = 600  # Function execution timeout (10 minutes) - max 24 hours
+SCALEDOWN_WINDOW = 300  # Container idle time before scaling down (5 minutes)
+# Note: startup_timeout can be added if ComfyUI initialization is slow
+# Example: startup_timeout=120  # Allow 2 minutes for container initialization
 
 # Handle secrets gracefully - make them optional
 # If secrets don't exist, the app will still work but B2/Civitai features won't

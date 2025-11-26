@@ -226,5 +226,14 @@ The deployment should now succeed! 🎉
 4. ✅ All Modal API usage verified and confirmed correct
 5. ✅ Environment variable mappings validated
 
+**For timeout and stalling research, see:**
+- `MODAL_TIMEOUT_RESEARCH.md` - **NEW** Comprehensive research on Modal deployment timeouts
+
+**Key timeout findings:**
+- ⚠️ Client-side timeout is normal - build continues on Modal servers
+- 📊 Use Modal Dashboard to monitor long builds (no timeout limit)
+- 🐢 PyTorch installation (10-15 min) is expected, not an error
+- ✅ Your configuration is correct - use dashboard for monitoring
+
 All issues have been resolved through deep investigation.
 
