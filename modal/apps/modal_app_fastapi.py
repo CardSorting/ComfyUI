@@ -15,6 +15,8 @@ import os
 app = modal.App("comfyui-api")
 
 # Define the container image
+# Using optimized build with better error handling
+# PyTorch installation is the slowest step (~10-15 min) but necessary
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(
@@ -22,10 +24,13 @@ image = (
         "libglib2.0-0", "libsm6", "libxext6", "libxrender-dev",
         "libgomp1", "libgl1-mesa-glx",
     )
+    # PyTorch installation - this is the slowest step (~10-15 minutes)
+    # If this stalls, check Modal dashboard for progress
     .pip_install(
         "torch", "torchvision", "torchaudio",
         index_url="https://download.pytorch.org/whl/cu121"
     )
+    # Other dependencies - much faster (~2-3 minutes)
     .pip_install(
         "torchsde", "numpy>=1.25.0", "einops",
         "transformers>=4.37.2", "tokenizers>=0.13.3",
@@ -39,7 +44,93 @@ image = (
         "boto3", "botocore",  # For Backblaze B2 S3-compatible uploads
     )
     # Add ComfyUI root directory LAST - this must be the final step
-    .add_local_dir("../..", remote_path="/app")
+    # Exclude large/unnecessary directories to speed up deployment
+    # Use copy=False to add files at runtime (not baked into image) - faster builds
+    .add_local_dir(
+        "../..", 
+        remote_path="/app",
+        copy=False,  # Files added at runtime, not during build - much faster!
+        ignore=[
+            # Exclude model directories (use volumes instead)
+            "models/**",
+            "output/**",
+            "input/**",
+            "!input/example.png",  # Keep example image
+            
+            # Exclude cache and build artifacts
+            "**/__pycache__/**",
+            "**/*.pyc",
+            "**/*.pyo",
+            "**/*.pyd",
+            ".pytest_cache/**",
+            ".mypy_cache/**",
+            
+            # Exclude git and version control
+            ".git/**",
+            ".gitignore",
+            ".github/**",
+            
+            # Exclude large binary files in custom nodes
+            "custom_nodes/**/*.safetensors",
+            "custom_nodes/**/*.pt",
+            "custom_nodes/**/*.pth",
+            "custom_nodes/**/*.bin",
+            "custom_nodes/**/*.ckpt",
+            "custom_nodes/**/.git/**",
+            
+            # Exclude test files and documentation (not needed at runtime)
+            "tests/**",
+            "tests-unit/**",
+            "docs/**",
+            "*.md",
+            "!README.md",  # Keep main README
+            "!modal/**/*.md",  # Keep modal docs
+            
+            # Exclude development files
+            ".vscode/**",
+            ".idea/**",
+            ".vs/**",
+            "*.log",
+            ".DS_Store",
+            "venv/**",
+            ".venv/**",
+            
+            # Exclude deployment scripts and configs
+            "*.sh",
+            "!modal/**/*.sh",  # Keep modal scripts
+            "docker-compose*.yml",
+            "Dockerfile*",
+            "*.service",
+            
+            # Exclude generated files
+            "*.png",
+            "!input/example.png",
+            "*.jpg",
+            "*.jpeg",
+            "openapi.yaml",
+            "filtered-openapi.yaml",
+            
+            # Exclude environment and config files
+            ".env",
+            ".env.*",
+            "env.template",
+            "extra_model_paths.yaml",
+            "civitai_models_config.json",
+            "models_config.json",
+            
+            # Exclude database files
+            "alembic_db/**",
+            "alembic.ini",
+            
+            # Exclude other large directories
+            "web/extensions/**",
+            "!web/extensions/logging.js.example",
+            "!web/extensions/core/**",
+            "web_custom_versions/**",
+            "user/**",
+            "temp/**",
+        ]
+    )
 )
 
 # Persistent volumes
@@ -47,9 +138,29 @@ models_volume = modal.Volume.from_name("comfyui-models", create_if_missing=True)
 outputs_volume = modal.Volume.from_name("comfyui-outputs", create_if_missing=True)
 
 # GPU and timeout configuration
-GPU_CONFIG = "A10G"
+GPU_CONFIG = "A10G"  # String format is correct (new Modal API)
 TIMEOUT = 600
 SCALEDOWN_WINDOW = 300
+
+# Handle secrets gracefully - make them optional
+# If secrets don't exist, the app will still work but B2/Civitai features won't
+secrets_list = []
+b2_secret = None
+civitai_secret = None
+
+try:
+    b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
+    secrets_list.append(b2_secret)
+except Exception:
+    # Secret doesn't exist - app will work but B2 uploads will be disabled
+    pass
+
+try:
+    civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
+    secrets_list.append(civitai_secret)
+except Exception:
+    # Secret doesn't exist - app will work but Civitai downloads may be limited
+    pass
 
 
 # ComfyUI Service with integrated FastAPI
@@ -62,7 +173,7 @@ SCALEDOWN_WINDOW = 300
         "/models": models_volume,
         "/outputs": outputs_volume,
     },
-    secrets=[modal.Secret.from_name("backblaze-b2-credentials")],
+    secrets=secrets_list if secrets_list else None,  # Only add secrets if they exist
 )
 @modal.asgi_app()
 def web():
@@ -656,7 +767,7 @@ def web():
     image=image,
     volumes={"/models": models_volume},
     timeout=7200,  # 2 hours for large models
-    secrets=[modal.Secret.from_name("civitai-api-key")],
+    secrets=[civitai_secret] if civitai_secret else None,  # Only if secret exists
 )
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """
