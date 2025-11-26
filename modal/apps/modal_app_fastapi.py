@@ -163,13 +163,13 @@ def _get_secrets_list():
     secrets = []
     
     try:
-        b2_secret = modal.Secret.from_name("backblaze-b2-credentials", create_if_missing=False)
+        b2_secret = modal.Secret.from_name("backblaze-b2-credentials")
         secrets.append(b2_secret)
     except Exception:
         pass  # Secret doesn't exist
     
     try:
-        civitai_secret = modal.Secret.from_name("civitai-api-key", create_if_missing=False)
+        civitai_secret = modal.Secret.from_name("civitai-api-key")
         secrets.append(civitai_secret)
     except Exception:
         pass  # Secret doesn't exist
