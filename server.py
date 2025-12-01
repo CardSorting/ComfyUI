@@ -62,19 +62,69 @@ async def compress_body(request: web.Request, handler):
 
 
 def create_cors_middleware(allowed_origin: str):
+    """
+    Create CORS middleware with pattern-based origin support for Cloud Run.
+    
+    If allowed_origin is "*", allows all origins.
+    If allowed_origin is "cloudrun", allows all Cloud Run origins (*.run.app).
+    Otherwise, uses the specified origin or checks against Cloud Run patterns.
+    """
+    import re
+    
+    # Pattern for Cloud Run URLs
+    cloudrun_pattern = re.compile(r"^https://.*\.run\.app$")
+    
+    # Determine if we should allow all origins or use pattern matching
+    allow_all = allowed_origin == "*"
+    allow_cloudrun = allowed_origin == "cloudrun" or allowed_origin == "*"
+    
     @web.middleware
     async def cors_middleware(request: web.Request, handler):
+        origin = request.headers.get('Origin')
+        
+        # Determine allowed origin for this request
+        allowed_origin_for_request = None
+        
+        if allow_all:
+            # Allow all origins
+            allowed_origin_for_request = origin if origin else "*"
+        elif allow_cloudrun and origin:
+            # Check if origin matches Cloud Run pattern
+            if cloudrun_pattern.match(origin):
+                allowed_origin_for_request = origin
+            elif allowed_origin and origin == allowed_origin:
+                # Also allow explicitly specified origin
+                allowed_origin_for_request = origin
+        elif origin and origin == allowed_origin:
+            # Exact match with specified origin
+            allowed_origin_for_request = origin
+        elif origin and cloudrun_pattern.match(origin):
+            # Fallback: allow Cloud Run origins even if not explicitly set
+            allowed_origin_for_request = origin
+        
         if request.method == "OPTIONS":
-            # Pre-flight request. Reply successfully:
-            response = web.Response()
+            # Pre-flight request
+            if allowed_origin_for_request:
+                response = web.Response()
+                response.headers['Access-Control-Allow-Origin'] = allowed_origin_for_request
+                response.headers['Access-Control-Allow-Methods'] = 'POST, GET, DELETE, PUT, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+                response.headers['Access-Control-Max-Age'] = '86400'  # 24 hours
+                return response
+            else:
+                return web.Response(status=403)  # Reject preflight if origin not allowed
         else:
             response = await handler(request)
-
-        response.headers['Access-Control-Allow-Origin'] = allowed_origin
-        response.headers['Access-Control-Allow-Methods'] = 'POST, GET, DELETE, PUT, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return response
+            
+            # Add CORS headers if origin is allowed
+            if allowed_origin_for_request:
+                response.headers['Access-Control-Allow-Origin'] = allowed_origin_for_request
+                response.headers['Access-Control-Allow-Methods'] = 'POST, GET, DELETE, PUT, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+            
+            return response
 
     return cors_middleware
 
