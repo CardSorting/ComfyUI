@@ -22,6 +22,7 @@ psutil
 alembic
 SQLAlchemy
 av>=14.2.0
+requests>=2.28.0
 
 #non essential dependencies:
 kornia>=0.7.1

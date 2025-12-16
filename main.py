@@ -474,12 +474,36 @@ if __name__ == "__main__":
     if sys.version_info.major == 3 and sys.version_info.minor < 10:
         logging.warning("WARNING: You are using a python version older than 3.10, please upgrade to a newer one. 3.12 and above is recommended.")
 
+    # Import provider node (optional, only if enabled)
+    try:
+        from provider_node import start_provider_node, stop_provider_node
+        provider_node_available = True
+    except ImportError:
+        provider_node_available = False
+
     event_loop, _, start_all_func = start_comfyui()
     try:
         x = start_all_func()
         app.logger.print_startup_warnings()
+        
+        # Start provider node in background after server setup
+        if provider_node_available:
+            # Start provider node after a short delay to ensure ComfyUI is ready
+            def start_provider_delayed():
+                import time
+                time.sleep(5)  # Wait for ComfyUI to be ready
+                start_provider_node()
+            
+            provider_thread = threading.Thread(target=start_provider_delayed, daemon=True)
+            provider_thread.start()
+        
         event_loop.run_until_complete(x)
     except KeyboardInterrupt:
         logging.info("\nStopped server")
+        if provider_node_available:
+            try:
+                stop_provider_node()
+            except:
+                pass
 
     cleanup_temp()

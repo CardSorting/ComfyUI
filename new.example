@@ -1,0 +1,3 @@
+ENABLE_PROVIDER_NODE=1
+COORDINATOR_URL=http://coordinator:3000
+WALLET_ADDRESS=your_solana_wallet_address

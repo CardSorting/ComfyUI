@@ -1,0 +1,22 @@
+[project]
+name = "comfyui-serverless"
+version = "0.1.0"
+description = "Serverless deployment and model management for ComfyUI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+]
+
+[project.optional-dependencies]
+huggingface = [
+    "huggingface_hub>=0.20.0",
+]
+modal = [
+    "modal>=0.60.0",
+]
+
+[tool.comfy]
+project = { name = "ComfyUI Serverless" }
+tool = { comfy = { web = "web" } }
+
