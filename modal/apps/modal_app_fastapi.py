@@ -944,6 +944,24 @@ def web():
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
+    @web_app.get("/debug/qwen")
+    async def debug_qwen_file():
+        """Read the qwen_image.py file and check module"""
+        try:
+            import comfy.text_encoders.qwen_image
+            module_file = comfy.text_encoders.qwen_image.__file__
+            
+            with open("/app/comfy/text_encoders/qwen_image.py", "r") as f:
+                content = f.read()
+                
+            return {
+                "module_file": module_file,
+                "file_content_snippet": content[:3000],  # Read enough to see the config
+                "config_in_file": 'intermediate_size": 9728' in content
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     return web_app
 
 
