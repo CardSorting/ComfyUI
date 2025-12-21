@@ -11,6 +11,14 @@ def test_workflow(workflow_file):
     with open(workflow_file, 'r') as f:
         workflow = json.load(f)
 
+    # Randomize seed
+    import random
+    seed = random.randint(1, 1000000000)
+    print(f"Randomized seed: {seed}")
+    for node_id, node in workflow.items():
+        if "inputs" in node and "seed" in node["inputs"]:
+            node["inputs"]["seed"] = seed
+
     payload = {
         "prompt": workflow,
         "wait_for_completion": True

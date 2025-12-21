@@ -166,9 +166,14 @@ class OmniGen2TransformerBlock(nn.Module):
             dtype=dtype, device=device, operations=operations,
         )
 
+        if ffn_dim_multiplier is not None:
+            inner_dim = int(dim * ffn_dim_multiplier)
+        else:
+            inner_dim = 4 * dim
+
         self.feed_forward = LuminaFeedForward(
             dim=dim,
-            inner_dim=4 * dim,
+            inner_dim=inner_dim,
             multiple_of=multiple_of,
             dtype=dtype, device=device, operations=operations
         )
