@@ -961,6 +961,9 @@ def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip
     clip_target.params = {}
     if len(clip_data) == 1:
         te_model = detect_te_model(clip_data[0])
+        if clip_type == CLIPType.QWEN_IMAGE:
+            te_model = TEModel.QWEN25_7B
+
         if te_model == TEModel.CLIP_G:
             if clip_type == CLIPType.STABLE_CASCADE:
                 clip_target.clip = sdxl_clip.StableCascadeClipModel
