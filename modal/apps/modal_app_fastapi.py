@@ -163,11 +163,11 @@ def _get_secrets_list():
     """
     secrets = []
     
-    try:
-        b2_secret = modal.Secret.from_name("backblaze-b2-credentials")
-        secrets.append(b2_secret)
-    except Exception:
-        pass  # Secret doesn't exist
+    # try:
+    #     b2_secret = modal.Secret.from_name("backblaze-b2-credentials")
+    #     secrets.append(b2_secret)
+    # except Exception:
+    #     pass  # Secret doesn't exist
     
     try:
         civitai_secret = modal.Secret.from_name("civitai-api-key")
@@ -194,147 +194,168 @@ def _get_secrets_list():
 def web():
     """FastAPI app that runs inside the GPU container with ComfyUI"""
     import sys
-    sys.path.insert(0, "/app")  # ComfyUI root
-    sys.path.insert(0, "/app/modal/apps")  # For b2_storage module
-    
+    import os
+    import asyncio
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import JSONResponse, FileResponse
     from pydantic import BaseModel
     import uuid
     import json
     import time
-    
-    # Reload volumes to ensure we see the latest data
-    # Modal volumes are eventually consistent, so this ensures fresh data on startup
-    print("🔄 Reloading volumes to get latest data...")
-    models_volume.reload()
-    outputs_volume.reload()
-    print("✅ Volumes reloaded")
-    
-    # Set environment variables for headless mode
-    os.environ['COMFYUI_HEADLESS'] = '1'
-    os.environ['DISABLE_PROGRESS_BARS'] = '1'
-    os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
-    os.environ['DO_NOT_TRACK'] = '1'
-    os.environ['COMFYUI_MODEL_PATH'] = '/models'
-    os.environ['COMFYUI_OUTPUT_PATH'] = '/outputs'
-    
-    # Import folder_paths FIRST to configure paths before anything else loads
-    import folder_paths
-    from comfy.cli_args import args
-    
-    # Configure folder paths to use the Modal volumes BEFORE importing main
-    folder_paths.set_output_directory('/outputs')
-    
-    # Ensure model directories exist before adding paths
-    model_dirs = {
-        "checkpoints": "/models/checkpoints",
-        "vae": "/models/vae",
-        "loras": "/models/loras",
-        "controlnet": "/models/controlnet",
-        "clip_vision": "/models/clip_vision",
-        "upscale_models": "/models/upscale_models",
-        "embeddings": "/models/embeddings",
-        "unet": "/models/unet",
-        "text_encoders": "/models/text_encoders",
-        "clip": "/models/clip"
-    }
-    
-    for category, path in model_dirs.items():
-        os.makedirs(path, exist_ok=True)
-        folder_paths.add_model_folder_path(category, path, is_default=True)
-    
-    # Also register text_encoders as clip source
-    folder_paths.add_model_folder_path("clip", "/models/text_encoders")
+    from contextlib import asynccontextmanager
 
-    checkpoint_paths = folder_paths.get_folder_paths('checkpoints')
-    print(f"📁 Configured model paths: {checkpoint_paths}")
-    
-    # Debug: Check if model files exist
-    import glob
-    for path in checkpoint_paths:
-        if os.path.exists(path):
-            files = os.listdir(path)
-            print(f"📦 Files in {path}: {files}")
-            # Check for our model specifically
-            if '2440705' in str(files):
-                print(f"✅ Found model file containing '2440705'")
-        else:
-            print(f"⚠️  Path does not exist: {path}")
-    
-    # Clear the filename cache BEFORE importing ComfyUI modules
-    # This ensures the cache is empty when nodes load and scan for models
-    if hasattr(folder_paths, 'filename_list_cache'):
-        folder_paths.filename_list_cache.clear()
-        print("🔄 Cleared filename cache before ComfyUI init")
-    
-    if hasattr(folder_paths, 'cache_helper'):
-        folder_paths.cache_helper.clear()
-        print("🔄 Cleared cache helper before ComfyUI init")
-    
-    # Touch the checkpoint directory to update its modification time
-    # This forces ComfyUI to rescan even if cache exists
-    import time
-    for path in checkpoint_paths:
-        if os.path.exists(path):
-            try:
-                os.utime(path, None)  # Update access/modification time
-                print(f"🔄 Updated modification time for {path}")
-            except Exception as e:
-                print(f"⚠️  Could not update mtime for {path}: {e}")
-    
-    # NOW import ComfyUI modules
-    import main
-    import execution
-    import comfy.model_management
-    
-    # Configure for headless mode
-    args.headless = True
-    args.disable_all_custom_nodes = True
-    args.whitelist_custom_nodes = ["websocket_image_save.py"]
-    
-    print("🚀 Initializing ComfyUI...")
-    
-    # Initialize ComfyUI (this loads nodes and starts execution thread)
-    event_loop, prompt_server, _ = main.start_comfyui()
-    event_loop.run_until_complete(prompt_server.setup())
-    
-    # Check how many nodes were loaded
-    import nodes
-    print(f"📦 Loaded {len(nodes.NODE_CLASS_MAPPINGS)} node types")
-    
-    # Force rescan of checkpoints by clearing ALL caches
-    # The cache uses directory mtime to determine if rescan is needed
-    # So we need to invalidate it properly
-    if hasattr(folder_paths, 'filename_list_cache'):
-        # Remove checkpoints from cache to force rescan
-        if 'checkpoints' in folder_paths.filename_list_cache:
-            del folder_paths.filename_list_cache['checkpoints']
-        print("🔄 Removed checkpoints from filename cache")
-    
-    if hasattr(folder_paths, 'cache_helper'):
-        folder_paths.cache_helper.clear()
-        print("🔄 Cleared cache helper")
-    
-    # Force a fresh scan by calling get_filename_list
-    # This will rescan because cache is empty/invalid
-    try:
-        # Update directory mtime to ensure cache invalidation works
+    sys.path.insert(0, "/app")  # ComfyUI root
+    sys.path.insert(0, "/app/modal/apps")  # For b2_storage module
+
+    # Global variables to hold ComfyUI state
+    comfyui_state = {
+        "prompt_server": None,
+        "event_loop": None,
+        "b2_storage": None
+    }
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """
+        Lifespan events for FastAPI.
+        Initializes ComfyUI on startup using the correct asyncio loop.
+        """
+        print("🚀 Starting ComfyUI lifespan...")
+        
+        # Reload volumes to ensure we see the latest data
+        print("🔄 Reloading volumes to get latest data...")
+        try:
+            models_volume.reload()
+            outputs_volume.reload()
+            print("✅ Volumes reloaded")
+        except Exception as e:
+            print(f"⚠️ Error reloading volumes: {e}")
+
+        # Set environment variables for headless mode
+        os.environ['COMFYUI_HEADLESS'] = '1'
+        os.environ['DISABLE_PROGRESS_BARS'] = '1'
+        os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+        os.environ['DO_NOT_TRACK'] = '1'
+        os.environ['COMFYUI_MODEL_PATH'] = '/models'
+        os.environ['COMFYUI_OUTPUT_PATH'] = '/outputs'
+        
+        # Import folder_paths FIRST to configure paths before anything else loads
+        import folder_paths
+        from comfy.cli_args import args
+        
+        # Configure folder paths to use the Modal volumes BEFORE importing main
+        folder_paths.set_output_directory('/outputs')
+        
+        # Ensure model directories exist before adding paths
+        model_dirs = {
+            "checkpoints": "/models/checkpoints",
+            "vae": "/models/vae",
+            "loras": "/models/loras",
+            "controlnet": "/models/controlnet",
+            "clip_vision": "/models/clip_vision",
+            "upscale_models": "/models/upscale_models",
+            "embeddings": "/models/embeddings",
+            "unet": "/models/unet",
+            "text_encoders": "/models/text_encoders",
+            "clip": "/models/clip"
+        }
+        
+        for category, path in model_dirs.items():
+            os.makedirs(path, exist_ok=True)
+            folder_paths.add_model_folder_path(category, path, is_default=True)
+        
+        # Also register text_encoders as clip source
+        folder_paths.add_model_folder_path("clip", "/models/text_encoders")
+
         checkpoint_paths = folder_paths.get_folder_paths('checkpoints')
+        print(f"📁 Configured model paths: {checkpoint_paths}")
+
+        # Clear the filename cache BEFORE importing ComfyUI modules
+        if hasattr(folder_paths, 'filename_list_cache'):
+            folder_paths.filename_list_cache.clear()
+            print("🔄 Cleared filename cache before ComfyUI init")
+        
+        if hasattr(folder_paths, 'cache_helper'):
+            folder_paths.cache_helper.clear()
+            print("🔄 Cleared cache helper before ComfyUI init")
+        
+        # Touch the checkpoint directory to update its modification time
         for path in checkpoint_paths:
             if os.path.exists(path):
-                # Touch directory to update mtime
-                os.utime(path, None)
+                try:
+                    os.utime(path, None)  # Update access/modification time
+                    print(f"🔄 Updated modification time for {path}")
+                except Exception as e:
+                    print(f"⚠️  Could not update mtime for {path}: {e}")
+
+        # NOW import ComfyUI modules
+        import main
+        import execution
+        import comfy.model_management
         
-        checkpoint_list = folder_paths.get_filename_list("checkpoints")
-        print(f"📋 Rescanned checkpoints: found {len(checkpoint_list)} models")
-        if checkpoint_list:
-            print(f"   Models: {checkpoint_list[:5]}")
+        # Configure for headless mode
+        args.headless = True
+        args.disable_all_custom_nodes = True
+        args.whitelist_custom_nodes = ["websocket_image_save.py"]
+        
+        print("🚀 Initializing ComfyUI...")
+        
+        # Helper to initialize ComfyUI manually to avoid run_until_complete error
+        print("🚀 Initializing ComfyUI manually...")
+        
+        # Import dependencies
+        import server
+        import nodes
+        import main
+        import threading
+        
+        loop = asyncio.get_running_loop()
+        print(f"ℹ️  Using running event loop: {loop}")
+        
+        # Initialize PromptServer with running loop
+        prompt_server = server.PromptServer(loop)
+        
+        # Initialize nodes (Async) - Replaces loop.run_until_complete(nodes.init_extra_nodes(...))
+        print("⏳ Initializing extra nodes...")
+        await nodes.init_extra_nodes(
+            init_custom_nodes=(not args.disable_all_custom_nodes) or len(args.whitelist_custom_nodes) > 0,
+            init_api_nodes=not args.disable_api_nodes
+        )
+        print("✅ Nodes initialized")
+        
+        # Start the prompt worker thread (from main.py start_comfyui)
+        threading.Thread(target=main.prompt_worker, daemon=True, args=(prompt_server.prompt_queue, prompt_server,)).start()
+        print("✅ Worker thread started")
+        
+        # Update state
+        comfyui_state["prompt_server"] = prompt_server
+        comfyui_state["event_loop"] = loop
+        
+        # Explicitly setup the server
+        await prompt_server.setup()
+        
+        # Check how many nodes were loaded
+        import nodes
+        print(f"📦 Loaded {len(nodes.NODE_CLASS_MAPPINGS)} node types")
+        
+        # Force rescan of checkpoints by clearing ALL caches again
+        if hasattr(folder_paths, 'filename_list_cache'):
+            if 'checkpoints' in folder_paths.filename_list_cache:
+                del folder_paths.filename_list_cache['checkpoints']
+            print("🔄 Removed checkpoints from filename cache")
+        
+        if hasattr(folder_paths, 'cache_helper'):
+            folder_paths.cache_helper.clear()
+            print("🔄 Cleared cache helper")
+        
+        # Monkey-patch CheckpointLoaderSimple to always return fresh list
+        try:
+             # Force scan
+            checkpoint_list = folder_paths.get_filename_list("checkpoints")
+            print(f"📋 Rescanned checkpoints: found {len(checkpoint_list)} models")
             
-            # Monkey-patch CheckpointLoaderSimple to always return fresh list
             from nodes import CheckpointLoaderSimple
-            original_input_types = CheckpointLoaderSimple.INPUT_TYPES
-            
+
             @classmethod
             def dynamic_input_types(cls):
                 # Always get fresh list, bypassing cache
@@ -347,51 +368,65 @@ def web():
                 }
             
             CheckpointLoaderSimple.INPUT_TYPES = dynamic_input_types
-            print(f"✅ Patched CheckpointLoaderSimple.INPUT_TYPES to use dynamic model list ({len(checkpoint_list)} models)")
-        else:
-            print("⚠️  No models found in rescan - check volume mount")
-    except Exception as e:
-        print(f"⚠️  Error forcing rescan: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Verify the prompt worker thread is running
-    import threading
-    active_threads = [t.name for t in threading.enumerate()]
-    print(f"🔄 Active threads: {active_threads}")
-    
-    print("✅ ComfyUI initialized successfully!")
-    
-    # Initialize Backblaze B2 storage (gracefully handle if not available)
-    b2_storage = None
-    try:
-        from b2_storage import BackblazeB2Storage
-        b2_storage = BackblazeB2Storage()
+            print(f"✅ Patched CheckpointLoaderSimple.INPUT_TYPES")
+        except Exception as e:
+            print(f"⚠️  Error patching/scanning: {e}")
+
+        # Verify the prompt worker thread is running
+        import threading
+        active_threads = [t.name for t in threading.enumerate()]
+        print(f"🔄 Active threads: {active_threads}")
         
-        if b2_storage.is_enabled():
-            storage_info = b2_storage.get_storage_info()
-            print(f"☁️  Backblaze B2 enabled: {storage_info['bucket']}")
-        else:
-            print("⚠️  Backblaze B2 storage is disabled - files will be served from Modal")
-    except Exception as e:
-        print(f"⚠️  Backblaze B2 storage initialization failed: {type(e).__name__}: {e}")
-        print("   Files will be served from Modal volumes")
+        print("✅ ComfyUI initialized successfully!")
         
-        # Create a dummy b2_storage object to prevent errors
-        class DummyB2Storage:
-            def is_enabled(self): return False
-            def get_storage_info(self): return {"enabled": False}
-            def upload_file(self, *args, **kwargs): return None
-            def list_files(self, *args, **kwargs): return []
-        b2_storage = DummyB2Storage()
-    
-    # Create FastAPI app
+        # Initialize Backblaze B2 storage
+        try:
+            from b2_storage import BackblazeB2Storage
+            b2_storage = BackblazeB2Storage()
+            
+            if b2_storage.is_enabled():
+                storage_info = b2_storage.get_storage_info()
+                print(f"☁️  Backblaze B2 enabled: {storage_info['bucket']}")
+            else:
+                print("⚠️  Backblaze B2 storage is disabled - files will be served from Modal")
+        except Exception as e:
+            print(f"⚠️  Backblaze B2 storage initialization failed: {e}")
+            # Create a dummy b2_storage object
+            class DummyB2Storage:
+                def is_enabled(self): return False
+                def get_storage_info(self): return {"enabled": False}
+                def upload_file(self, *args, **kwargs): return None
+                def list_files(self, *args, **kwargs): return []
+            b2_storage = DummyB2Storage()
+        
+        comfyui_state["b2_storage"] = b2_storage
+
+        yield
+        
+        print("🛑 Shutting down ComfyUI...")
+        # Cleanup code if needed
+
+    # Create FastAPI app with lifespan
     web_app = FastAPI(
         title="ComfyUI API on Modal",
         description="Serverless ComfyUI API powered by Modal",
-        version="1.0.0"
+        version="1.1.0",
+        lifespan=lifespan
     )
     
+    # Helper to get state safely
+    def get_prompt_server():
+        if comfyui_state["prompt_server"] is None:
+            raise HTTPException(status_code=503, detail="ComfyUI not initialized")
+        return comfyui_state["prompt_server"]
+
+    def get_b2_storage():
+        if comfyui_state["b2_storage"] is None:
+            # Fallback
+            from b2_storage import BackblazeB2Storage
+            return BackblazeB2Storage() 
+        return comfyui_state["b2_storage"]
+
     class PromptRequest(BaseModel):
         prompt: dict
         client_id: str | None = None
@@ -400,6 +435,7 @@ def web():
     
     def wait_for_execution(prompt_id: str, timeout: int = 600) -> dict:
         """Wait for a workflow execution to complete and return results"""
+        prompt_server = get_prompt_server()
         start_time = time.time()
         
         while time.time() - start_time < timeout:
@@ -446,6 +482,7 @@ def web():
     
     def upload_outputs_to_b2(prompt_id: str, outputs: dict) -> dict:
         """Upload output files to Backblaze B2"""
+        b2_storage = get_b2_storage()
         if not b2_storage.is_enabled():
             return {"error": "B2 storage is not enabled"}
         
@@ -504,17 +541,19 @@ def web():
     @web_app.get("/")
     async def root():
         """API information"""
+        b2_storage = get_b2_storage()
         b2_info = b2_storage.get_storage_info() if b2_storage else {"enabled": False}
         
         # Get current model count
         try:
+            import folder_paths
             checkpoint_count = len(folder_paths.get_filename_list("checkpoints"))
         except:
             checkpoint_count = 0
         
         return {
             "name": "ComfyUI on Modal with Backblaze B2",
-            "version": "1.1.0",  # Updated version to track deployments
+            "version": "1.1.0",
             "status": "running",
             "models_loaded": checkpoint_count,
             "backblaze_b2": b2_info,
@@ -536,6 +575,10 @@ def web():
     async def queue_prompt(request: PromptRequest):
         """Queue a ComfyUI workflow for execution"""
         try:
+            prompt_server = get_prompt_server()
+            # Need to import execution inside function or use fully qualified
+            import execution
+            
             prompt_id = str(uuid.uuid4())
             
             valid = await execution.validate_prompt(prompt_id, request.prompt, None)
@@ -559,6 +602,7 @@ def web():
             if request.wait_for_completion:
                 execution_result = wait_for_execution(prompt_id, timeout=TIMEOUT)
                 
+                b2_storage = get_b2_storage()
                 if (request.upload_to_b2 and 
                     b2_storage.is_enabled() and 
                     execution_result.get('status') == 'completed' and 
@@ -589,6 +633,7 @@ def web():
     async def get_queue():
         """Get current queue status"""
         try:
+            prompt_server = get_prompt_server()
             current_queue = prompt_server.prompt_queue.get_current_queue_volatile()
             return {
                 "queue_running": current_queue[0],
@@ -601,6 +646,7 @@ def web():
     async def get_all_history():
         """Get all execution history"""
         try:
+            prompt_server = get_prompt_server()
             history = prompt_server.prompt_queue.get_history()
             return history
         except Exception as e:
@@ -610,6 +656,7 @@ def web():
     async def get_history_by_id(prompt_id: str):
         """Get execution history for specific prompt"""
         try:
+            prompt_server = get_prompt_server()
             history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
             return history
         except Exception as e:
@@ -619,12 +666,14 @@ def web():
     async def upload_history_to_b2(prompt_id: str):
         """Upload outputs from a completed execution to Backblaze B2"""
         try:
+            b2_storage = get_b2_storage()
             if not b2_storage.is_enabled():
                 raise HTTPException(
                     status_code=400, 
                     detail="Backblaze B2 storage is not enabled"
                 )
             
+            prompt_server = get_prompt_server()
             history = prompt_server.prompt_queue.get_history(prompt_id=prompt_id)
             
             if prompt_id not in history:
@@ -658,6 +707,7 @@ def web():
     async def get_system_stats():
         """Get system statistics"""
         try:
+            import comfy.model_management
             device = comfy.model_management.get_torch_device()
             device_name = comfy.model_management.get_torch_device_name(device)
             
@@ -684,6 +734,7 @@ def web():
     async def interrupt_execution():
         """Interrupt current execution"""
         try:
+            import comfy.model_management
             comfy.model_management.interrupt_current_processing()
             return {"status": "interrupted"}
         except Exception as e:
@@ -693,6 +744,7 @@ def web():
     async def get_b2_status():
         """Get Backblaze B2 storage status and configuration"""
         try:
+            b2_storage = get_b2_storage()
             if not b2_storage.is_enabled():
                 return {
                     "enabled": False,
@@ -746,6 +798,7 @@ def web():
     async def reload_models():
         """Reload volumes and rescan all model directories"""
         try:
+            import folder_paths
             # Reload volumes to get latest data
             print("🔄 Reloading volumes...")
             models_volume.reload()
@@ -780,6 +833,7 @@ def web():
     async def debug_folder_paths():
         """Debug endpoint to see what folders ComfyUI knows about"""
         try:
+            import folder_paths
             debug_info = {}
             
             for folder_type in ["checkpoints", "vae", "loras", "controlnet"]:
@@ -864,6 +918,7 @@ def web():
         """Get available node information"""
         try:
             out = {}
+            import nodes
             for node_class_name in nodes.NODE_CLASS_MAPPINGS:
                 try:
                     node_class = nodes.NODE_CLASS_MAPPINGS[node_class_name]
@@ -1220,4 +1275,3 @@ def main():
     print("  POST /prompt          - Queue a workflow")
     print("  GET  /queue           - Get queue status")
     print("  GET  /system_stats    - Get system information")
-
