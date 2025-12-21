@@ -1,0 +1,25 @@
+{
+    "3": {
+        "inputs": {
+            "image": "example.png",
+            "upload": "image"
+        },
+        "class_type": "LoadImage",
+        "_meta": {
+            "title": "Load Image"
+        }
+    },
+    "9": {
+        "inputs": {
+            "filename_prefix": "TestOutput",
+            "images": [
+                "3",
+                0
+            ]
+        },
+        "class_type": "SaveImage",
+        "_meta": {
+            "title": "Save Image"
+        }
+    }
+}

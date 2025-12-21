@@ -1,0 +1,140 @@
+{
+    "3": {
+        "inputs": {
+            "seed": 156680208700286,
+            "steps": 20,
+            "cfg": 1.0,
+            "sampler_name": "euler",
+            "scheduler": "simple",
+            "denoise": 1,
+            "model": [
+                "13",
+                0
+            ],
+            "positive": [
+                "6",
+                0
+            ],
+            "negative": [
+                "7",
+                0
+            ],
+            "latent_image": [
+                "5",
+                0
+            ]
+        },
+        "class_type": "KSampler",
+        "_meta": {
+            "title": "KSampler"
+        }
+    },
+    "4": {
+        "inputs": {
+            "vae_name": "ae.safetensors"
+        },
+        "class_type": "VAELoader",
+        "_meta": {
+            "title": "Load VAE"
+        }
+    },
+    "5": {
+        "inputs": {
+            "width": 1024,
+            "height": 1024,
+            "batch_size": 1
+        },
+        "class_type": "EmptySD3LatentImage",
+        "_meta": {
+            "title": "Empty SD3 Latent Image"
+        }
+    },
+    "6": {
+        "inputs": {
+            "text": "A beautiful landscape with mountains and a river, cinematic lighting, 8k resolution, detailed.",
+            "clip": [
+                "11",
+                0
+            ]
+        },
+        "class_type": "CLIPTextEncode",
+        "_meta": {
+            "title": "CLIP Text Encode (Positive)"
+        }
+    },
+    "7": {
+        "inputs": {
+            "text": "blurry, low quality, distortion, ugly",
+            "clip": [
+                "11",
+                0
+            ]
+        },
+        "class_type": "CLIPTextEncode",
+        "_meta": {
+            "title": "CLIP Text Encode (Negative)"
+        }
+    },
+    "8": {
+        "inputs": {
+            "samples": [
+                "3",
+                0
+            ],
+            "vae": [
+                "4",
+                0
+            ]
+        },
+        "class_type": "VAEDecode",
+        "_meta": {
+            "title": "VAE Decode"
+        }
+    },
+    "9": {
+        "inputs": {
+            "filename_prefix": "ZImageTurbo",
+            "images": [
+                "8",
+                0
+            ]
+        },
+        "class_type": "SaveImage",
+        "_meta": {
+            "title": "Save Image"
+        }
+    },
+    "11": {
+        "inputs": {
+            "clip_name": "qwen_3_4b.safetensors",
+            "type": "qwen_image"
+        },
+        "class_type": "CLIPLoader",
+        "_meta": {
+            "title": "Load CLIP"
+        }
+    },
+    "12": {
+        "inputs": {
+            "unet_name": "z_image_turbo_bf16.safetensors",
+            "weight_dtype": "default"
+        },
+        "class_type": "UNETLoader",
+        "_meta": {
+            "title": "Load UNet"
+        }
+    },
+    "13": {
+        "inputs": {
+            "model": [
+                "12",
+                0
+            ],
+            "shift": 3.0
+        },
+        "class_type": "ModelSamplingAuraFlow",
+        "_meta": {
+            "title": "Model Sampling AuraFlow"
+        }
+    }
+}

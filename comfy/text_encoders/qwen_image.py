@@ -49,7 +49,19 @@ class QwenImageTokenizer(sd1_clip.SD1Tokenizer):
 
 class Qwen25_7BVLIModel(sd1_clip.SDClipModel):
     def __init__(self, device="cpu", layer="last", layer_idx=None, dtype=None, attention_mask=True, model_options={}):
-        super().__init__(device=device, layer=layer, layer_idx=layer_idx, textmodel_json_config={}, dtype=dtype, special_tokens={"pad": 151643}, layer_norm_hidden_state=False, model_class=comfy.text_encoders.llama.Qwen25_7BVLI, enable_attention_masks=attention_mask, return_attention_masks=attention_mask, model_options=model_options)
+        print("DEBUG: Initializing Qwen25_7BVLIModel with 4B Patch")
+        # Patch for Qwen-3/4B (Qwen1.5-4B architecture)
+        config_4b = {
+            "vocab_size": 151936,
+            "hidden_size": 2560,
+            "intermediate_size": 6912,
+            "num_hidden_layers": 40,
+            "num_attention_heads": 20,
+            "num_key_value_heads": 20,
+            "max_position_embeddings": 32768,
+            "rope_theta": 1000000.0,
+        }
+        super().__init__(device=device, layer=layer, layer_idx=layer_idx, textmodel_json_config=config_4b, dtype=dtype, special_tokens={"pad": 151643}, layer_norm_hidden_state=False, model_class=comfy.text_encoders.llama.Qwen25_7BVLI, enable_attention_masks=attention_mask, return_attention_masks=attention_mask, model_options=model_options)
 
 
 class QwenImageTEModel(sd1_clip.SD1ClipModel):

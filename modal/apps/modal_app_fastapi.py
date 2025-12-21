@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 # Modal app configuration
-app = modal.App("comfyui-api")
+app = modal.App("comfyui-api-debug")
 
 # Get the absolute path to ComfyUI root (parent of modal/apps/)
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -234,13 +234,19 @@ def web():
         "controlnet": "/models/controlnet",
         "clip_vision": "/models/clip_vision",
         "upscale_models": "/models/upscale_models",
-        "embeddings": "/models/embeddings"
+        "embeddings": "/models/embeddings",
+        "unet": "/models/unet",
+        "text_encoders": "/models/text_encoders",
+        "clip": "/models/clip"
     }
     
     for category, path in model_dirs.items():
         os.makedirs(path, exist_ok=True)
         folder_paths.add_model_folder_path(category, path, is_default=True)
     
+    # Also register text_encoders as clip source
+    folder_paths.add_model_folder_path("clip", "/models/text_encoders")
+
     checkpoint_paths = folder_paths.get_folder_paths('checkpoints')
     print(f"📁 Configured model paths: {checkpoint_paths}")
     
@@ -752,7 +758,7 @@ def web():
                 folder_paths.cache_helper.clear()
             
             # Force rescan of all model types
-            model_types = ["checkpoints", "vae", "loras", "controlnet", "clip_vision", "upscale_models", "embeddings"]
+            model_types = ["checkpoints", "vae", "loras", "controlnet", "clip_vision", "upscale_models", "embeddings", "unet", "clip"]
             results = {}
             
             for model_type in model_types:
@@ -763,8 +769,8 @@ def web():
                     results[model_type] = f"error: {str(e)}"
             
             return {
-                "status": "success",
-                "message": "Volumes reloaded and models rescanned",
+                "status": "success", 
+                "message": "Volumes reloaded and models rescanned", 
                 "model_counts": results
             }
         except Exception as e:
@@ -792,14 +798,30 @@ def web():
                             ])
                         except Exception as e:
                             debug_info[folder_type]["error"] = str(e)
-                    else:
-                        debug_info[folder_type]["path_exists"] = False
-            
-            debug_info["available_checkpoints"] = folder_paths.get_filename_list("checkpoints")
             
             return debug_info
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+            
+    @web_app.get("/debug/qwen")
+    async def debug_qwen_file():
+        """Read the qwen_image.py file and check module"""
+        try:
+            import comfy.text_encoders.qwen_image
+            module_file = comfy.text_encoders.qwen_image.__file__
+            
+            with open("/app/comfy/text_encoders/qwen_image.py", "r") as f:
+                content = f.read()
+                
+            return {
+                "module_file": module_file,
+                "file_content_snippet": content[:1000],  # First 1000 chars should contain our print and patch
+                "has_debug_print": 'DEBUG: Initializing Qwen25_7BVLIModel with 4B Patch' in content,
+                "has_config_patch": 'config_4b =' in content
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     
     @web_app.get("/outputs")
     async def list_outputs():
@@ -960,6 +982,12 @@ def _get_civitai_model_name(url: str, civitai_api_key: str = None) -> Tuple[Opti
         print(f"   ⚠️  Could not fetch model info from Civitai: {e}")
         return (None, None)
 
+@app.function(
+    image=image,
+    volumes={"/models": models_volume},
+    timeout=600,
+    secrets=_get_secrets_list(),
+)
 def download_model(url: str, category: str = "checkpoints", filename: str = None):
     """Download a single model from URL to the persistent volume"""
     import urllib.request
@@ -1096,7 +1124,8 @@ def list_models():
     """List all models in the persistent volume"""
     categories = [
         "checkpoints", "vae", "loras", "controlnet", 
-        "clip_vision", "unet", "embeddings", "upscale_models"
+        "clip_vision", "unet", "embeddings", "upscale_models",
+        "text_encoders", "clip"
     ]
     
     print("📦 Models in persistent volume:")
