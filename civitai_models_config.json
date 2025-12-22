@@ -39,6 +39,13 @@
       "model_type": "vae",
       "source": "huggingface",
       "repo_id": "stabilityai/sd-vae-ft-mse"
+    },
+    {
+      "name": "Endlustria Lumica",
+      "model_type": "checkpoints",
+      "source": "civitai",
+      "model_id": 1981990,
+      "version_id": 2519737
     }
   ],
   "settings": {
