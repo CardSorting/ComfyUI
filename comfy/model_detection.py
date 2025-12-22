@@ -538,7 +538,7 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
         dit_config["axes_dim_rope"] = [40, 40, 40]
         dit_config["axes_lens"] = [1024, 1664, 1664]
         
-        # V3 Fix
+        # V3 Fix - FORCE SYNC V5
         # 10240 (inner) / 3840 (dim) = 2.666... = 8/3
         dit_config["ffn_dim_multiplier"] = 8.0/3.0
         
