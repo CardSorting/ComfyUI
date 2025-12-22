@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 # Modal app configuration
-app = modal.App("comfyui-api-debug-fix-v3")
+app = modal.App("comfyui-api-debug-fix-v4")
 
 # Get the absolute path to ComfyUI root (parent of modal/apps/)
 SCRIPT_DIR = Path(__file__).parent.resolve()
