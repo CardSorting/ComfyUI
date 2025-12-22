@@ -14,6 +14,7 @@ Usage:
 """
 
 import modal
+from modal.mount import Mount
 import os
 from pathlib import Path
 from typing import Tuple, Optional
@@ -61,7 +62,6 @@ image = (
     # Add ComfyUI root directory using absolute path
     # Use copy=False to add files at runtime (not baked into image) - faster builds
     # Add ComfyUI root directory using absolute path
-    # Use copy=False to add files at runtime (not baked into image) - faster builds
     .add_local_dir(
         str(COMFYUI_ROOT), 
         remote_path="/root/comfy_app",
@@ -146,6 +146,12 @@ image = (
             "user/**",
             "temp/**",
         ]
+    )
+    # Explicitly add the patched model_detection.py file to ensure it's not ignored or stale
+    .add_local_file(
+        str(COMFYUI_ROOT / "comfy/model_detection.py"),
+        remote_path="/root/comfy_app/comfy/model_detection.py",
+        copy=False
     )
 )
 
@@ -821,18 +827,6 @@ def web_v3():
             with open(full_path, 'r') as f:
                 content = f.read()
             return {"path": full_path, "content": content}
-            if not os.path.exists(full_path):
-                # Try listing root to debug
-                if request.path == "ROOT":
-                    return {"path": "/", "content": str(os.listdir("/"))}
-                raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
-            
-            if os.path.isdir(full_path):
-                return {"path": full_path, "content": str(os.listdir(full_path))}
-            
-            with open(full_path, 'r') as f:
-                content = f.read()
-            return {"path": full_path, "content": content}
         except Exception as e:
              raise HTTPException(status_code=500, detail=str(e))
 
@@ -908,7 +902,7 @@ def web_v3():
             import comfy.text_encoders.qwen_image
             module_file = comfy.text_encoders.qwen_image.__file__
             
-            with open("/app/comfy/text_encoders/qwen_image.py", "r") as f:
+            with open("/root/comfy_app_v5/comfy/text_encoders/qwen_image.py", "r") as f:
                 content = f.read()
                 
             return {
@@ -995,7 +989,7 @@ def web_v3():
             import comfy.text_encoders.qwen_image
             module_file = comfy.text_encoders.qwen_image.__file__
             
-            with open("/app/comfy/text_encoders/qwen_image.py", "r") as f:
+            with open("/root/comfy_app_v5/comfy/text_encoders/qwen_image.py", "r") as f:
                 content = f.read()
                 
             return {
