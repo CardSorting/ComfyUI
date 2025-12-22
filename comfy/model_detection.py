@@ -36,6 +36,17 @@ def calculate_transformer_depth(prefix, state_dict_keys, state_dict):
 
 def detect_unet_config(state_dict, key_prefix, metadata=None):
     state_dict_keys = list(state_dict.keys())
+    print(f"DEBUG: detect_unet_config called with prefix '{key_prefix}'")
+    print(f"DEBUG: First 10 keys: {state_dict_keys[:10]}")
+    
+    # Check for specific keys relevant to our debugging
+    debug_keys = [
+        '{}noise_refiner.0.attention.qkv.weight'.format(key_prefix),
+        '{}time_caption_embed.timestep_embedder.linear_1.bias'.format(key_prefix),
+        '{}x_embedder.weight'.format(key_prefix)
+    ]
+    found_keys = [k for k in debug_keys if k in state_dict_keys]
+    print(f"DEBUG: Found relevant keys: {found_keys}")
 
     if '{}joint_blocks.0.context_block.attn.qkv.weight'.format(key_prefix) in state_dict_keys: #mmdit model
         unet_config = {}
@@ -527,6 +538,7 @@ def detect_unet_config(state_dict, key_prefix, metadata=None):
         dit_config["axes_dim_rope"] = [40, 40, 40]
         dit_config["axes_lens"] = [1024, 1664, 1664]
         
+        # V3 Fix
         # 10240 (inner) / 3840 (dim) = 2.666... = 8/3
         dit_config["ffn_dim_multiplier"] = 8.0/3.0
         

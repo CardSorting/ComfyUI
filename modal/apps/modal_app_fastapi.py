@@ -19,11 +19,12 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 # Modal app configuration
-app = modal.App("comfyui-api-debug")
+app = modal.App("comfyui-api-debug-fix-v3")
 
 # Get the absolute path to ComfyUI root (parent of modal/apps/)
 SCRIPT_DIR = Path(__file__).parent.resolve()
 COMFYUI_ROOT = SCRIPT_DIR.parent.parent
+
 
 # Build the container image
 # IMPORTANT: All image building happens at deploy time, so we use absolute paths
@@ -59,9 +60,11 @@ image = (
     )
     # Add ComfyUI root directory using absolute path
     # Use copy=False to add files at runtime (not baked into image) - faster builds
+    # Add ComfyUI root directory using absolute path
+    # Use copy=False to add files at runtime (not baked into image) - faster builds
     .add_local_dir(
         str(COMFYUI_ROOT), 
-        remote_path="/app",
+        remote_path="/root/comfy_app_v3",
         copy=False,
         ignore=[
             # Exclude model directories (use volumes instead)
@@ -163,11 +166,12 @@ def _get_secrets_list():
     """
     secrets = []
     
-    # try:
-    #     b2_secret = modal.Secret.from_name("backblaze-b2-credentials")
-    #     secrets.append(b2_secret)
-    # except Exception:
-    #     pass  # Secret doesn't exist
+    try:
+        # b2_secret = modal.Secret.from_name("backblaze-b2-credentials")
+        # secrets.append(b2_secret)
+        pass
+    except Exception:
+        pass  # Secret doesn't exist
     
     try:
         civitai_secret = modal.Secret.from_name("civitai-api-key")
@@ -204,8 +208,9 @@ def web():
     import time
     from contextlib import asynccontextmanager
 
-    sys.path.insert(0, "/app")  # ComfyUI root
-    sys.path.insert(0, "/app/modal/apps")  # For b2_storage module
+    sys.path.insert(0, "/root/comfy_app_v3")  # ComfyUI root
+    sys.path.insert(0, "/root/comfy_app_v3/modal/apps")  # For b2_storage module
+    os.chdir("/root/comfy_app_v3") # Ensure we are in the root directory
 
     # Global variables to hold ComfyUI state
     comfyui_state = {
@@ -794,6 +799,11 @@ def web():
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
+    class DebugFileRequest(BaseModel):
+        path: str
+
+
+             
     @web_app.post("/reload_models")
     async def reload_models():
         """Reload volumes and rescan all model directories"""

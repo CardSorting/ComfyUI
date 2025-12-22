@@ -4,7 +4,7 @@ import requests
 import sys
 import time
 
-API_URL = "https://cardsorting--comfyui-api-debug-web.modal.run"
+API_URL = "https://cardsorting--comfyui-api-debug-fix-v3-web.modal.run"
 
 def test_workflow(workflow_file):
     print(f"Loading workflow from {workflow_file}...")
